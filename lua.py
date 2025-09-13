@@ -178,12 +178,13 @@ if "scored" in st.session_state:
     - A segmentação permite diversidade maior, mantendo foco no público médio comprador
     """)
 
-    # --------------------------
-    # Tabela automática de clusters
-    # --------------------------
-    st.subheader("📋 Resumo de Clusters")
-    cluster_summary = scored_data.groupby("cluster").agg(
-        Clientes=('cluster', 'count'),
-        Comprou=('comprou','mean')
-    ).reset_index()
-    cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].s_
+# --------------------------
+# Tabela automática de clusters
+# --------------------------
+st.subheader("📋 Resumo de Clusters")
+cluster_summary = scored_data.groupby("cluster").agg(
+    Clientes=('cluster', 'count'),
+    Comprou=('comprou','mean')
+).reset_index()
+cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
+st.dataframe(cluster_summary)
