@@ -179,6 +179,78 @@ if "scored" in st.session_state:
     """)
 
 # --------------------------
+# 3. Visualizar Resultados
+# --------------------------
+if "scored" in st.session_state:
+    scored_data = st.session_state["scored"]
+    cluster_names = st.session_state["cluster_names"]
+
+    st.header("3️⃣ Visualize os Resultados")
+
+    # Importância das features
+    importances = st.session_state["model"].feature_importances_
+    feat_names = scored_data.drop(columns=["comprou", "score_final", "cluster"]).columns
+    imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
+    st.subheader("🔥 Importância das Features")
+    st.bar_chart(imp_df.set_index("feature"))
+
+    # PCA para visualização
+    encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
+    for col in encoded.select_dtypes(include="object").columns:
+        encoded[col] = LabelEncoder().fit_transform(encoded[col])
+    X_scaled = StandardScaler().fit_transform(encoded)
+    pcs = PCA(n_components=2).fit_transform(X_scaled)
+
+    st.subheader("📌 PCA com Cluster e Compra")
+    fig, ax = plt.subplots(figsize=(8,6))
+    sns.scatterplot(
+        x=pcs[:,0], y=pcs[:,1],
+        hue=scored_data["cluster"],
+        style=scored_data["comprou"],
+        palette="tab10",
+        alpha=0.7,
+        s=100
+    )
+    ax.set_title("Mapa de Clientes por PCA e Cluster")
+    ax.legend(title="Cluster / Comprou")
+    st.pyplot(fig)
+
+    st.subheader("📊 Clusters como Bolhas")
+    # Estatísticas de cada cluster
+    cluster_stats = scored_data.groupby("cluster").agg(
+        x=('idade','mean'),
+        y=('renda','mean'),
+        pct_comprou=('comprou','mean'),
+        clientes=('cluster','count')
+    ).reset_index()
+
+    fig2, ax2 = plt.subplots(figsize=(8,6))
+    sns.scatterplot(
+        x='x', y='y',
+        size='clientes',
+        hue='pct_comprou',
+        data=cluster_stats,
+        palette="RdYlGn",
+        sizes=(50, 500),
+        legend="brief",
+        alpha=0.7
+    )
+    ax2.set_title("Clusters de Clientes - Tamanho e Taxa de Compra")
+    ax2.set_xlabel("Idade média")
+    ax2.set_ylabel("Renda média")
+    st.pyplot(fig2)
+
+    # Scores finais
+    st.subheader("📝 Como ler o score final")
+    st.markdown("""
+    - Formato: `Score & Cluster`
+    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5, Comprou 70%`
+    - Score 5 → comprador mais provável, 0 → indefinido
+    - Cluster → mostra perfil médio de idade, renda, visitas e taxa de compra do grupo
+    - A segmentação permite diversidade maior, mantendo foco no público médio comprador
+    """)
+
+# --------------------------
 # Tabela automática de clusters
 # --------------------------
 st.subheader("📋 Resumo de Clusters")
