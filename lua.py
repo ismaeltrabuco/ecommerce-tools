@@ -168,3 +168,58 @@ if "scored" in st.session_state:
     - Score 5 → comprador mais provável, 0 → indefinido
     - Cluster → mostra perfil médio de idade, renda e visitas do grupo
     """)
+# --------------------------
+# 3. Visualizar Resultados
+# --------------------------
+if "scored" in st.session_state:
+    scored_data = st.session_state["scored"]
+    cluster_names = st.session_state["cluster_names"]
+
+    st.header("✨ Visualizar Resultados")
+
+    # Importância das features
+    importances = st.session_state["model"].feature_importances_
+    feat_names = scored_data.drop(columns=["comprou", "score_final", "cluster"]).columns
+    imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
+    st.subheader("🔥 Importância das Features")
+    st.bar_chart(imp_df.set_index("feature"))
+
+    # PCA para visualização em 2D
+    encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
+    for col in encoded.select_dtypes(include="object").columns:
+        encoded[col] = LabelEncoder().fit_transform(encoded[col])
+    X_scaled = StandardScaler().fit_transform(encoded)
+    pcs = PCA(n_components=2).fit_transform(X_scaled)
+
+    fig, ax = plt.subplots()
+    sns.scatterplot(
+        x=pcs[:,0], y=pcs[:,1],
+        hue=scored_data["comprou"],
+        palette={1:"green", 0:"orange", -1:"red"},
+        alpha=0.7
+    )
+    ax.set_title("Mapa de Clientes por PCA")
+    st.pyplot(fig)
+
+    # Scores finais
+    st.subheader("📝 Como ler o score final")
+    st.markdown("""
+    - O formato é: `Score & Cluster`
+    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5`
+    - Score 5 → comprador mais provável, 0 → indefinido
+    - Cluster → mostra perfil médio de idade, renda e visitas do grupo
+    """)
+
+    # --------------------------
+    # Tabela automática de clusters
+    # --------------------------
+    st.subheader("📋 Resumo de Clusters")
+    cluster_summary = scored_data.groupby("cluster").agg(
+        Clientes=('cluster', 'count')
+    ).reset_index()
+    cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum() * 100).round(1)
+    cluster_summary["Nome do Cluster"] = cluster_summary["cluster"].map(cluster_names)
+    cluster_summary = cluster_summary[["Nome do Cluster", "Clientes", "Percentual"]].sort_values("Clientes", ascending=False)
+    st.dataframe(cluster_summary)
+
+
