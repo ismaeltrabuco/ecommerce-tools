@@ -1,113 +1,136 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import time
+import matplotlib.pyplot as plt
+import seaborn as sns
 
-st.set_page_config(page_title="Empathy Data AI", layout="wide")
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import LabelEncoder
 
-# ======================================================
-# Núcleo: Empathy Step (do paper, simplificado)
-# ======================================================
-def empathy_step(y_t, o_t, lam=0.01):
+# --------------------------
+# Função Empatia (paper empathy function)
+# --------------------------
+def empathy_function(prob):
     """
-    Atualiza o estado y_t em direção ao alinhamento com o "outro" o_t.
-    y_{t+1} = y_t + λ * cov(y_t, o_t)
+    Ajusta a probabilidade do modelo para refletir mais "empatia".
+    Ex: evita classificações extremas em populações diversas.
     """
-    y_t = np.asarray(y_t, dtype=float)
-    o_t = np.asarray(o_t, dtype=float)
-    cov = np.cov(y_t, o_t, bias=True)[0, 1]
-    return y_t + lam * cov
+    return np.clip(prob * 0.9 + 0.05, 0, 1)  # suaviza extremos
 
-# ======================================================
-# Cabeçalho
-# ======================================================
-st.title("💎 Empathy Data AI")
-st.markdown("""
-🚀 Seu e-commerce pode vender mais.  
-Unimos a **inteligência das máquinas** à **empatia humana** para transformar dados em estratégias.  
-""")
 
-# ======================================================
-# Sidebar Configurações do Público
-# ======================================================
-st.sidebar.header("⚙️ Configurações do Público")
-idade = st.sidebar.slider("Idade média", 18, 65, 30)
-renda = st.sidebar.slider("Renda média (R$)", 1000, 20000, 5000, step=500)
-classe = st.sidebar.selectbox("Classe social predominante", ["A", "B", "C", "D", "E"])
-genero = st.sidebar.selectbox("Gênero predominante", ["Masculino", "Feminino", "Misto"])
-n_samples = st.sidebar.slider("Número de clientes simulados", 50, 1000, 200)
-
-# ======================================================
-# 1. Gerar Banco de Dados
-# ======================================================
-st.header("📊 Gerar Banco de Dados")
-
-if st.button("Gerar Dados"):
-    df = pd.DataFrame({
-        "idade": np.random.normal(idade, 5, n_samples).astype(int),
-        "renda": np.random.normal(renda, renda * 0.2, n_samples).astype(int),
-        "classe": np.random.choice([classe, "outros"], size=n_samples, p=[0.7, 0.3]),
-        "genero": np.random.choice([genero, "outros"], size=n_samples, p=[0.8, 0.2]),
-        "comprou": np.random.choice([0, 1], size=n_samples, p=[0.6, 0.4])
+# --------------------------
+# Geração de dataset sintético
+# --------------------------
+def generate_customers(n=200):
+    np.random.seed(42)
+    data = pd.DataFrame({
+        "idade": np.random.randint(18, 65, n),
+        "classe_social": np.random.choice(["A", "B", "C", "D"], n),
+        "genero": np.random.choice(["M", "F", "O"], n),
+        "fase_da_lua": np.random.choice(["Nova", "Cheia", "Minguante", "Crescente"], n),
+        "visitas_no_site": np.random.poisson(5, n),
+        "cliques_redes_sociais": np.random.poisson(3, n),
+        "visitante_retorno": np.random.choice([0, 1], n),
+        "tempo_no_site": np.random.normal(10, 4, n).clip(1, 60),
+        "newsletter_signed": np.random.choice([0, 1], n)
     })
 
-    st.success("✅ Banco de dados gerado com sucesso!")
-    st.dataframe(df.head())
+    # Variável alvo sintética
+    probs = (
+        0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
+        + 0.2 * (data["visitante_retorno"])
+        + 0.2 * (data["newsletter_signed"])
+        + 0.1 * (data["visitas_no_site"] / (1 + data["visitas_no_site"].max()))
+    )
 
-    # Cards com médias
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Idade Média", f"{df['idade'].mean():.1f} anos")
-    col2.metric("Renda Média", f"R$ {df['renda'].mean():,.0f}")
-    col3.metric("Taxa de Compra", f"{df['comprou'].mean() * 100:.1f}%")
+    probs = empathy_function(probs)  # aplica função de empatia
+    y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
+    data["comprou"] = y
 
-    st.caption("📊 Esses dados representam o **perfil médio da sua clientela**. É com base neles que vamos treinar o modelo.")
-    st.session_state["df"] = df
+    return data
 
-# ======================================================
-# 2. Treinar Modelo (simulado + Empathy Step)
-# ======================================================
-if "df" in st.session_state:
-    st.header("🤖 Treinar Modelo")
 
-    if st.button("Treinar Agora"):
-        with st.spinner("Aprendendo com seu público e histórico de vendas..."):
-            time.sleep(2)  # simulação
+# --------------------------
+# Treino + Scoring
+# --------------------------
+def train_and_score(data):
+    features = data.drop(columns=["comprou"])
+    target = data["comprou"]
 
-            df = st.session_state["df"]
-            # Empathy update: usa visitas simuladas e compras
-            y_t = df["idade"].values
-            o_t = df["comprou"].values
-            y_next = empathy_step(y_t, o_t)
+    # Encode variáveis categóricas
+    encoded = features.copy()
+    for col in encoded.select_dtypes(include="object").columns:
+        encoded[col] = LabelEncoder().fit_transform(encoded[col])
 
-            acc = np.random.uniform(0.7, 0.95)
-            feat_importance = "Idade" if idade > 40 else "Renda"
+    model = RandomForestClassifier(n_estimators=100, random_state=42)
+    model.fit(encoded, target)
 
-        st.success("✅ Modelo treinado com sucesso!")
-        col1, col2 = st.columns(2)
-        col1.metric("Acurácia (simulada)", f"{acc*100:.1f}%")
-        col2.metric("Feature mais importante", feat_importance)
+    probs = model.predict_proba(encoded)
+    max_probs = probs.max(axis=1)
+    scaled_scores = (max_probs * 5).round().astype(int)
 
-        st.caption("🧠 Nosso modelo foi previamente treinado por especialistas e agora está **aprendendo com os seus dados simulados**: quem comprou, o que vendeu e quando.")
-        st.session_state["y_next"] = y_next
+    # Clusterização para gerar classes ASCII (XX)
+    kmeans = KMeans(n_clusters=6, random_state=42, n_init="auto")
+    clusters = kmeans.fit_predict(encoded)
 
-# ======================================================
-# 3. Visualizar Resultados
-# ======================================================
-if "df" in st.session_state and "y_next" in st.session_state:
-    st.header("✨ Visualizar Resultados")
-    st.markdown("""
-    Agora vamos ver o que o modelo aprendeu e pode nos ensinar.  
-    Aqui estão os **padrões ocultos** que unem inteligência de máquina e empatia humana.
-    """)
+    ascii_classes = []
+    for i, cluster in enumerate(clusters):
+        letter = chr(65 + (cluster % 26))  # A, B, C...
+        number = (cluster // 26) + 1
+        ascii_classes.append(f"{letter}{number}")
 
-    df = st.session_state["df"]
-    compras_por_classe = df.groupby("classe")["comprou"].mean()
+    data["score_final"] = [
+        f"{s}&{c}" for s, c in zip(scaled_scores, ascii_classes)
+    ]
 
-    st.bar_chart(compras_por_classe)
+    return model, data, encoded.columns
 
-    # Insights empáticos automáticos
-    st.subheader("💡 Insights Empáticos")
-    st.markdown(f"- 🌙 Seu público de classe **{classe}** tem taxa de compra de {compras_por_classe[classe]*100:.1f}%.")
-    st.markdown(f"- 👥 A idade média do seu público é **{idade} anos** — invista em comunicação personalizada.")
-    st.markdown("- 🚀 Produtos de maior valor atraem melhor o segmento com renda mais alta.")
-    st.markdown("- 🤝 O modelo aplicou a *Empathy Function*, alinhando perfis de compra com características do público.")
+
+# --------------------------
+# Streamlit App
+# --------------------------
+st.title("📊 Inteligência de Vendas com Empatia")
+
+st.markdown("""
+Seu e-commerce pode vender mais **direcionando investimentos e estratégias onde realmente importa**.  
+Aqui você gera um banco de dados dos seus clientes, treina um modelo e descobre **o ouro escondido nos seus dados**.  
+A novidade? Unimos a **inteligência das máquinas** à **empatia humana**, para que todos saiam ganhando.
+""")
+
+n = st.slider("Número de clientes", 50, 1000, 200)
+data = generate_customers(n)
+model, scored_data, feat_names = train_and_score(data)
+
+# Mostrar tabela
+st.subheader("📋 Amostra dos Clientes")
+st.dataframe(scored_data.head(10))
+
+# Importância das features
+st.subheader("🔥 Importância das Features")
+importances = model.feature_importances_
+imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
+
+fig, ax = plt.subplots()
+sns.barplot(data=imp_df, x="importance", y="feature", ax=ax)
+st.pyplot(fig)
+
+# Visualização grupos
+st.subheader("🎯 Visualização dos Grupos")
+fig2, ax2 = plt.subplots()
+sns.scatterplot(
+    data=scored_data, x="idade", y="visitas_no_site",
+    hue="comprou", palette={1: "green", 0: "orange", -1: "red"},
+    alpha=0.7
+)
+ax2.set_title("Distribuição: Compradores (1), Duvidosos (0), Não Compradores (-1)")
+st.pyplot(fig2)
+
+# Legenda explicativa
+st.markdown("""
+### 📝 Como ler o score final
+- `5&A1 = 5 (Comprador quase certo) & A1 = semelhante a 20% de outros clientes`  
+- `0&F3 = 0 (Indefinido) & F3 = semelhante a 40% de outros clientes`  
+
+Isso ajuda a **rotular grupos semelhantes** e entender melhor o comportamento do público.
+""")
