@@ -50,7 +50,7 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
     return data
 
 # --------------------------
-# Treino e score (versão legível)
+# Treino e score (versão legível e segmentada)
 # --------------------------
 def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
@@ -77,11 +77,12 @@ def train_and_score(data, n_clusters=6):
     clusters = kmeans.fit_predict(X_scaled)
     data["cluster"] = clusters
 
-    # Criação de nomes legíveis para clusters
-    cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site"]].mean().round(0)
+    # Criação de nomes legíveis para clusters (incluindo taxa de compra)
+    cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site","comprou"]].mean().round(2)
     cluster_names = {}
     for c, row in cluster_profiles.iterrows():
-        cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}"
+        compra_pct = int(row['comprou']*100)
+        cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
 
     # Score final interpretável
     data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
@@ -89,9 +90,16 @@ def train_and_score(data, n_clusters=6):
     return model, data, encoded.columns, clusters, cluster_names
 
 # --------------------------
-# Streamlit App
+# Narrativa inicial
 # --------------------------
-st.title("💎 Empathy Data AI")
+st.title("💎 Seu negócio precisa de Inteligência Artificial")
+st.markdown("""
+Mas não precisa te perder, precisa manter a humanidade e sua inteligência.
+
+Nossos modelos são equipados com a inovadora **Empathy Function** que sente quem é você, seu negócio e seus clientes, antes de responder às suas perguntas.
+
+Você pode se surpreender com as informações que a inteligência artificial, aliada ao humanismo e natural, pode fazer pelo seu negócio e por todos nós enquanto sociedade.
+""")
 
 st.sidebar.header("⚙️ Configurações do Público")
 idade_m = st.sidebar.slider("Idade média", 18, 65, 30)
@@ -102,13 +110,11 @@ n = st.sidebar.slider("Número de clientes", 50, 1000, 200)
 # --------------------------
 # 1. Gerar Dados
 # --------------------------
-st.header("📊 Gerar Banco de Dados")
-
+st.header("1️⃣ Gere um Banco de Dados")
 if st.button("Gerar Dados"):
     data = generate_customers(n, idade_m, renda_m, visitas_m)
     st.session_state["df"] = data
     st.success("✅ Banco de dados gerado!")
-
     st.dataframe(data.head())
     st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
     st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
@@ -118,7 +124,7 @@ if st.button("Gerar Dados"):
 # 2. Treinar Modelo
 # --------------------------
 if "df" in st.session_state:
-    st.header("🤖 Treinar Modelo")
+    st.header("2️⃣ Treine o Modelo")
     if st.button("Treinar Agora"):
         with st.spinner("Aprendendo com seu público..."):
             time.sleep(2)
@@ -134,48 +140,9 @@ if "df" in st.session_state:
 # --------------------------
 if "scored" in st.session_state:
     scored_data = st.session_state["scored"]
-
-    st.header("✨ Visualizar Resultados")
-
-    # Importância das features
-    importances = st.session_state["model"].feature_importances_
-    imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
-    st.subheader("🔥 Importância das Features")
-    st.bar_chart(imp_df.set_index("feature"))
-
-    # PCA para visualização em 2D
-    encoded = scored_data.drop(columns=["comprou", "score_final"])
-    for col in encoded.select_dtypes(include="object").columns:
-        encoded[col] = LabelEncoder().fit_transform(encoded[col])
-    X_scaled = StandardScaler().fit_transform(encoded)
-    pcs = PCA(n_components=2).fit_transform(X_scaled)
-
-    fig, ax = plt.subplots()
-    sns.scatterplot(
-        x=pcs[:,0], y=pcs[:,1],
-        hue=scored_data["comprou"],
-        palette={1:"green", 0:"orange", -1:"red"},
-        alpha=0.7
-    )
-    ax.set_title("Mapa de Clientes por PCA")
-    st.pyplot(fig)
-
-    # Scores finais
-    st.subheader("📝 Como ler o score final")
-    st.markdown("""
-    - O formato é: `Score & Cluster`
-    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5`
-    - Score 5 → comprador mais provável, 0 → indefinido
-    - Cluster → mostra perfil médio de idade, renda e visitas do grupo
-    """)
-# --------------------------
-# 3. Visualizar Resultados
-# --------------------------
-if "scored" in st.session_state:
-    scored_data = st.session_state["scored"]
     cluster_names = st.session_state["cluster_names"]
 
-    st.header("✨ Visualizar Resultados")
+    st.header("3️⃣ Visualize os Resultados")
 
     # Importância das features
     importances = st.session_state["model"].feature_importances_
@@ -184,7 +151,7 @@ if "scored" in st.session_state:
     st.subheader("🔥 Importância das Features")
     st.bar_chart(imp_df.set_index("feature"))
 
-    # PCA para visualização em 2D
+    # PCA para visualização
     encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
@@ -204,10 +171,11 @@ if "scored" in st.session_state:
     # Scores finais
     st.subheader("📝 Como ler o score final")
     st.markdown("""
-    - O formato é: `Score & Cluster`
-    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5`
+    - Formato: `Score & Cluster`
+    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5, Comprou 70%`
     - Score 5 → comprador mais provável, 0 → indefinido
-    - Cluster → mostra perfil médio de idade, renda e visitas do grupo
+    - Cluster → mostra perfil médio de idade, renda, visitas e taxa de compra do grupo
+    - A segmentação permite diversidade maior, mantendo foco no público médio comprador
     """)
 
     # --------------------------
@@ -215,11 +183,7 @@ if "scored" in st.session_state:
     # --------------------------
     st.subheader("📋 Resumo de Clusters")
     cluster_summary = scored_data.groupby("cluster").agg(
-        Clientes=('cluster', 'count')
+        Clientes=('cluster', 'count'),
+        Comprou=('comprou','mean')
     ).reset_index()
-    cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum() * 100).round(1)
-    cluster_summary["Nome do Cluster"] = cluster_summary["cluster"].map(cluster_names)
-    cluster_summary = cluster_summary[["Nome do Cluster", "Clientes", "Percentual"]].sort_values("Clientes", ascending=False)
-    st.dataframe(cluster_summary)
-
-
+    cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].s_
