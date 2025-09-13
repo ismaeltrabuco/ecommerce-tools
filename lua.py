@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-import plotly.express as px
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import KMeans
@@ -17,7 +16,7 @@ st.set_page_config(page_title="Empathy Data AI", layout="wide")
 # Função Empatia
 # --------------------------
 def empathy_function(prob):
-    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)  # 10% mínimo/máximo para evitar extremos
+    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)  # mínimo/máximo de 10% e 90%
 
 # --------------------------
 # Geração de dataset sintético
@@ -37,7 +36,6 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
         "newsletter_signed": np.random.choice([0, 1], n)
     })
 
-    # Variável alvo
     probs = (
         0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
         + 0.2 * data["visitante_retorno"]
@@ -57,49 +55,39 @@ def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
     target = data["comprou"]
 
-    # Encode features categóricas
     encoded = features.copy()
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
 
-    # RandomForest
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(encoded, target)
 
-    # Probabilidades e score
     probs = model.predict_proba(encoded)
     max_probs = probs.max(axis=1)
     scaled_scores = (max_probs * 5).round().astype(int)
 
-    # KMeans → clusters
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(encoded)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
     clusters = kmeans.fit_predict(X_scaled)
     data["cluster"] = clusters
 
-    # Nomes legíveis dos clusters
     cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site","comprou"]].mean().round(2)
     cluster_names = {}
     for c, row in cluster_profiles.iterrows():
         compra_pct = int(row['comprou']*100)
         cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
 
-    # Score final
     data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
 
     return model, data, encoded.columns, clusters, cluster_names
 
 # --------------------------
-# Narrativa inicial
+# Interface
 # --------------------------
 st.title("💎 Seu negócio precisa de Inteligência Artificial")
 st.markdown("""
-Mas não precisa te perder, precisa manter a humanidade e sua inteligência.
-
-Nossos modelos são equipados com a inovadora **Empathy Function** que sente quem é você, seu negócio e seus clientes, antes de responder às suas perguntas.
-
-Você pode se surpreender com as informações que a inteligência artificial, aliada ao humanismo e natural, pode fazer pelo seu negócio e por todos nós enquanto sociedade.
+Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
 """)
 
 st.sidebar.header("⚙️ Configurações do Público")
@@ -109,7 +97,7 @@ visitas_m = st.sidebar.slider("Visitas médias no site", 1, 20, 5)
 n = st.sidebar.slider("Número de clientes", 50, 1000, 200)
 
 # --------------------------
-# 1. Gerar Dados
+# Gerar Dados
 # --------------------------
 st.header("1️⃣ Gere um Banco de Dados")
 if st.button("Gerar Dados"):
@@ -122,7 +110,7 @@ if st.button("Gerar Dados"):
     st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
 
 # --------------------------
-# 2. Treinar Modelo
+# Treinar Modelo
 # --------------------------
 if "df" in st.session_state:
     st.header("2️⃣ Treine o Modelo")
@@ -137,7 +125,7 @@ if "df" in st.session_state:
         st.success("✅ Modelo treinado com sucesso!")
 
 # --------------------------
-# 3. Visualizar Resultados
+# Visualização
 # --------------------------
 if "scored" in st.session_state:
     scored_data = st.session_state["scored"]
@@ -173,6 +161,7 @@ if "scored" in st.session_state:
     ax.legend(title="Cluster / Comprou")
     st.pyplot(fig)
 
+    # Clusters como bolhas
     st.subheader("📊 Clusters como Bolhas")
     cluster_stats = scored_data.groupby("cluster").agg(
         x=('idade','mean'),
@@ -201,38 +190,33 @@ if "scored" in st.session_state:
     # Análise de quem comprou
     # --------------------------
     st.subheader("🛍️ Quem Comprou e o que têm em comum")
-    scored_data["comprou_prob"] = np.clip(scored_data["comprou"], 0.1, 0.9)
-
-    # Estatísticas médias das features por grupo
     features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
     medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
     st.dataframe(medias)
 
-    # Scatter interativo Plotly
-    fig3 = px.scatter(
-        scored_data,
-        x="idade",
-        y="renda",
-        color="comprou",
+    # Scatter compradores vs não compradores
+    fig3, ax3 = plt.subplots(figsize=(8,6))
+    sns.scatterplot(
+        x="idade", y="renda",
+        hue="comprou",
         size="visitas_no_site",
-        hover_data=["tempo_no_site", "newsletter_signed", "cliques_redes_sociais"],
-        title="Distribuição de Clientes Compradores vs Não Compradores"
+        data=scored_data,
+        palette={1:"green", 0:"orange", -1:"red"},
+        alpha=0.7,
+        sizes=(20,200)
     )
-    fig3.update_layout(xaxis_title="Idade", yaxis_title="Renda", legend_title="Comprou")
-    st.plotly_chart(fig3)
+    ax3.set_title("Distribuição de Clientes Compradores vs Não Compradores")
+    st.pyplot(fig3)
 
-    # Gráfico de barras interativo comparando médias
-    fig4 = px.bar(
-        medias.T,
-        title="Médias das Features por Grupo de Compra",
-        labels={"index":"Feature", "value":"Média", "comprou":"Comprou"},
-        barmode="group"
-    )
-    st.plotly_chart(fig4)
+    # Gráfico de barras comparando médias
+    fig4, ax4 = plt.subplots(figsize=(10,5))
+    medias.T.plot(kind="bar", ax=ax4)
+    ax4.set_title("Médias das Features por Grupo de Compra")
+    ax4.set_xlabel("Feature")
+    ax4.set_ylabel("Média")
+    st.pyplot(fig4)
 
-# --------------------------
-# Tabela automática de clusters
-# --------------------------
+# Tabela de clusters
 st.subheader("📋 Resumo de Clusters")
 cluster_summary = scored_data.groupby("cluster").agg(
     Clientes=('cluster', 'count'),
