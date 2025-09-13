@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import plotly.express as px
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import KMeans
@@ -16,7 +17,7 @@ st.set_page_config(page_title="Empathy Data AI", layout="wide")
 # Função Empatia
 # --------------------------
 def empathy_function(prob):
-    return np.clip(prob * 0.9 + 0.05, 0, 1)
+    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)  # 10% mínimo/máximo para evitar extremos
 
 # --------------------------
 # Geração de dataset sintético
@@ -50,7 +51,7 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
     return data
 
 # --------------------------
-# Treino e score (versão legível e segmentada)
+# Treino e score
 # --------------------------
 def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
@@ -61,7 +62,7 @@ def train_and_score(data, n_clusters=6):
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
 
-    # Modelo RandomForest
+    # RandomForest
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(encoded, target)
 
@@ -77,14 +78,14 @@ def train_and_score(data, n_clusters=6):
     clusters = kmeans.fit_predict(X_scaled)
     data["cluster"] = clusters
 
-    # Criação de nomes legíveis para clusters (incluindo taxa de compra)
+    # Nomes legíveis dos clusters
     cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site","comprou"]].mean().round(2)
     cluster_names = {}
     for c, row in cluster_profiles.iterrows():
         compra_pct = int(row['comprou']*100)
         cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
 
-    # Score final interpretável
+    # Score final
     data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
 
     return model, data, encoded.columns, clusters, cluster_names
@@ -151,50 +152,7 @@ if "scored" in st.session_state:
     st.subheader("🔥 Importância das Features")
     st.bar_chart(imp_df.set_index("feature"))
 
-    # PCA para visualização
-    encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-    for col in encoded.select_dtypes(include="object").columns:
-        encoded[col] = LabelEncoder().fit_transform(encoded[col])
-    X_scaled = StandardScaler().fit_transform(encoded)
-    pcs = PCA(n_components=2).fit_transform(X_scaled)
-
-    fig, ax = plt.subplots()
-    sns.scatterplot(
-        x=pcs[:,0], y=pcs[:,1],
-        hue=scored_data["comprou"],
-        palette={1:"green", 0:"orange", -1:"red"},
-        alpha=0.7
-    )
-    ax.set_title("Mapa de Clientes por PCA")
-    st.pyplot(fig)
-
-    # Scores finais
-    st.subheader("📝 Como ler o score final")
-    st.markdown("""
-    - Formato: `Score & Cluster`
-    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5, Comprou 70%`
-    - Score 5 → comprador mais provável, 0 → indefinido
-    - Cluster → mostra perfil médio de idade, renda, visitas e taxa de compra do grupo
-    - A segmentação permite diversidade maior, mantendo foco no público médio comprador
-    """)
-
-# --------------------------
-# 3. Visualizar Resultados
-# --------------------------
-if "scored" in st.session_state:
-    scored_data = st.session_state["scored"]
-    cluster_names = st.session_state["cluster_names"]
-
-    st.header("3️⃣ Visualize os Resultados")
-
-    # Importância das features
-    importances = st.session_state["model"].feature_importances_
-    feat_names = scored_data.drop(columns=["comprou", "score_final", "cluster"]).columns
-    imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
-    st.subheader("🔥 Importância das Features")
-    st.bar_chart(imp_df.set_index("feature"))
-
-    # PCA para visualização
+    # PCA
     encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
@@ -216,7 +174,6 @@ if "scored" in st.session_state:
     st.pyplot(fig)
 
     st.subheader("📊 Clusters como Bolhas")
-    # Estatísticas de cada cluster
     cluster_stats = scored_data.groupby("cluster").agg(
         x=('idade','mean'),
         y=('renda','mean'),
@@ -240,15 +197,38 @@ if "scored" in st.session_state:
     ax2.set_ylabel("Renda média")
     st.pyplot(fig2)
 
-    # Scores finais
-    st.subheader("📝 Como ler o score final")
-    st.markdown("""
-    - Formato: `Score & Cluster`
-    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5, Comprou 70%`
-    - Score 5 → comprador mais provável, 0 → indefinido
-    - Cluster → mostra perfil médio de idade, renda, visitas e taxa de compra do grupo
-    - A segmentação permite diversidade maior, mantendo foco no público médio comprador
-    """)
+    # --------------------------
+    # Análise de quem comprou
+    # --------------------------
+    st.subheader("🛍️ Quem Comprou e o que têm em comum")
+    scored_data["comprou_prob"] = np.clip(scored_data["comprou"], 0.1, 0.9)
+
+    # Estatísticas médias das features por grupo
+    features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
+    medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
+    st.dataframe(medias)
+
+    # Scatter interativo Plotly
+    fig3 = px.scatter(
+        scored_data,
+        x="idade",
+        y="renda",
+        color="comprou",
+        size="visitas_no_site",
+        hover_data=["tempo_no_site", "newsletter_signed", "cliques_redes_sociais"],
+        title="Distribuição de Clientes Compradores vs Não Compradores"
+    )
+    fig3.update_layout(xaxis_title="Idade", yaxis_title="Renda", legend_title="Comprou")
+    st.plotly_chart(fig3)
+
+    # Gráfico de barras interativo comparando médias
+    fig4 = px.bar(
+        medias.T,
+        title="Médias das Features por Grupo de Compra",
+        labels={"index":"Feature", "value":"Média", "comprou":"Comprou"},
+        barmode="group"
+    )
+    st.plotly_chart(fig4)
 
 # --------------------------
 # Tabela automática de clusters
