@@ -50,35 +50,43 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
     return data
 
 # --------------------------
-# Treino e score
+# Treino e score (versão legível)
 # --------------------------
 def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
     target = data["comprou"]
 
+    # Encode features categóricas
     encoded = features.copy()
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
 
+    # Modelo RandomForest
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(encoded, target)
 
+    # Probabilidades e score
     probs = model.predict_proba(encoded)
     max_probs = probs.max(axis=1)
     scaled_scores = (max_probs * 5).round().astype(int)
 
-    # KMeans → classes alfanuméricas
+    # KMeans → clusters
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(encoded)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
-    clusters = kmeans.fit_predict(StandardScaler().fit_transform(encoded))
+    clusters = kmeans.fit_predict(X_scaled)
+    data["cluster"] = clusters
 
-    ascii_classes = []
-    for cluster in clusters:
-        letter = chr(65 + (cluster % 26))
-        number = (cluster // 26) + 1
-        ascii_classes.append(f"{letter}{number}")
+    # Criação de nomes legíveis para clusters
+    cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site"]].mean().round(0)
+    cluster_names = {}
+    for c, row in cluster_profiles.iterrows():
+        cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}"
 
-    data["score_final"] = [f"{s}&{c}" for s, c in zip(scaled_scores, ascii_classes)]
-    return model, data, encoded.columns, clusters
+    # Score final interpretável
+    data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
+
+    return model, data, encoded.columns, clusters, cluster_names
 
 # --------------------------
 # Streamlit App
@@ -114,10 +122,11 @@ if "df" in st.session_state:
     if st.button("Treinar Agora"):
         with st.spinner("Aprendendo com seu público..."):
             time.sleep(2)
-            model, scored_data, feat_names, clusters = train_and_score(st.session_state["df"])
+            model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
             st.session_state["model"] = model
             st.session_state["scored"] = scored_data
             st.session_state["clusters"] = clusters
+            st.session_state["cluster_names"] = cluster_names
         st.success("✅ Modelo treinado com sucesso!")
 
 # --------------------------
@@ -154,6 +163,8 @@ if "scored" in st.session_state:
     # Scores finais
     st.subheader("📝 Como ler o score final")
     st.markdown("""
-    - `5&A1 = 5 (Comprador quase certo) & A1 = semelhante a 20% de outros clientes`  
-    - `0&F3 = 0 (Indefinido) & F3 = semelhante a 40% de outros clientes`  
+    - O formato é: `Score & Cluster`
+    - Exemplo: `5 & Cluster 1 - Idade 32, Renda R$5200, Visitas 5`
+    - Score 5 → comprador mais provável, 0 → indefinido
+    - Cluster → mostra perfil médio de idade, renda e visitas do grupo
     """)
