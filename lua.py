@@ -68,7 +68,7 @@ def train_and_score(data, n_clusters=6):
 
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(encoded)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X_scaled)
     data["cluster"] = clusters
 
