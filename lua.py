@@ -101,13 +101,21 @@ n = st.sidebar.slider("Número de clientes", 50, 1000, 200)
 # --------------------------
 st.header("1️⃣ Gere um Banco de Dados")
 if st.button("Gerar Dados"):
-    data = generate_customers(n, idade_m, renda_m, visitas_m)
-    st.session_state["df"] = data
-    st.success("✅ Banco de dados gerado!")
-    st.dataframe(data.head())
-    st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
-    st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
-    st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
+    try:
+        data = generate_customers(n, idade_m, renda_m, visitas_m)
+        st.session_state["df"] = data
+        st.success("✅ Banco de dados gerado!")
+        st.dataframe(data.head())
+        
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
+        with col2:
+            st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
+        with col3:
+            st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
+    except Exception as e:
+        st.error(f"Erro ao gerar dados: {str(e)}")
 
 # --------------------------
 # Treinar Modelo
@@ -115,112 +123,143 @@ if st.button("Gerar Dados"):
 if "df" in st.session_state:
     st.header("2️⃣ Treine o Modelo")
     if st.button("Treinar Agora"):
-        with st.spinner("Aprendendo com seu público..."):
-            time.sleep(2)
-            model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
-            st.session_state["model"] = model
-            st.session_state["scored"] = scored_data
-            st.session_state["clusters"] = clusters
-            st.session_state["cluster_names"] = cluster_names
-        st.success("✅ Modelo treinado com sucesso!")
+        try:
+            with st.spinner("Aprendendo com seu público..."):
+                time.sleep(2)
+                model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
+                st.session_state["model"] = model
+                st.session_state["scored"] = scored_data
+                st.session_state["clusters"] = clusters
+                st.session_state["cluster_names"] = cluster_names
+            st.success("✅ Modelo treinado com sucesso!")
+        except Exception as e:
+            st.error(f"Erro ao treinar modelo: {str(e)}")
 
 # --------------------------
 # Visualização
 # --------------------------
 if "scored" in st.session_state:
-    scored_data = st.session_state["scored"]
-    cluster_names = st.session_state["cluster_names"]
+    try:
+        scored_data = st.session_state["scored"]
+        cluster_names = st.session_state["cluster_names"]
 
-    st.header("3️⃣ Visualize os Resultados")
+        st.header("3️⃣ Visualize os Resultados")
 
-    # Importância das features
-    importances = st.session_state["model"].feature_importances_
-    feat_names = scored_data.drop(columns=["comprou", "score_final", "cluster"]).columns
-    imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
-    st.subheader("🔥 Importância das Features")
-    st.bar_chart(imp_df.set_index("feature"))
+        # Importância das features
+        importances = st.session_state["model"].feature_importances_
+        feat_names = [col for col in scored_data.columns if col not in ["comprou", "score_final", "cluster"]]
+        imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
+        
+        st.subheader("🔥 Importância das Features")
+        st.bar_chart(imp_df.set_index("feature"))
 
-    # PCA
-    encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-    for col in encoded.select_dtypes(include="object").columns:
-        encoded[col] = LabelEncoder().fit_transform(encoded[col])
-    X_scaled = StandardScaler().fit_transform(encoded)
-    pcs = PCA(n_components=2).fit_transform(X_scaled)
+        # PCA
+        encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
+        for col in encoded.select_dtypes(include="object").columns:
+            encoded[col] = LabelEncoder().fit_transform(encoded[col])
+        
+        X_scaled = StandardScaler().fit_transform(encoded)
+        pcs = PCA(n_components=2).fit_transform(X_scaled)
 
-    st.subheader("📌 PCA com Cluster e Compra")
-    fig, ax = plt.subplots(figsize=(8,6))
-    sns.scatterplot(
-        x=pcs[:,0], y=pcs[:,1],
-        hue=scored_data["cluster"],
-        style=scored_data["comprou"],
-        palette="tab10",
-        alpha=0.7,
-        s=100
-    )
-    ax.set_title("Mapa de Clientes por PCA e Cluster")
-    ax.legend(title="Cluster / Comprou")
-    st.pyplot(fig)
+        st.subheader("📌 PCA com Cluster e Compra")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        plt.style.use('default')
+        
+        scatter = ax.scatter(
+            pcs[:, 0], pcs[:, 1],
+            c=scored_data["cluster"],
+            s=60,
+            alpha=0.7,
+            cmap='tab10'
+        )
+        
+        ax.set_title("Mapa de Clientes por PCA e Cluster")
+        ax.set_xlabel("Componente Principal 1")
+        ax.set_ylabel("Componente Principal 2")
+        plt.colorbar(scatter, ax=ax, label="Cluster")
+        st.pyplot(fig)
 
-    # Clusters como bolhas
-    st.subheader("📊 Clusters como Bolhas")
-    cluster_stats = scored_data.groupby("cluster").agg(
-        x=('idade','mean'),
-        y=('renda','mean'),
-        pct_comprou=('comprou','mean'),
-        clientes=('cluster','count')
-    ).reset_index()
+        # Clusters como bolhas
+        st.subheader("📊 Clusters como Bolhas")
+        cluster_stats = scored_data.groupby("cluster").agg(
+            x=('idade','mean'),
+            y=('renda','mean'),
+            pct_comprou=('comprou','mean'),
+            clientes=('cluster','count')
+        ).reset_index()
 
-    fig2, ax2 = plt.subplots(figsize=(8,6))
-    sns.scatterplot(
-        x='x', y='y',
-        size='clientes',
-        hue='pct_comprou',
-        data=cluster_stats,
-        palette="RdYlGn",
-        sizes=(50, 500),
-        legend="brief",
-        alpha=0.7
-    )
-    ax2.set_title("Clusters de Clientes - Tamanho e Taxa de Compra")
-    ax2.set_xlabel("Idade média")
-    ax2.set_ylabel("Renda média")
-    st.pyplot(fig2)
+        fig2, ax2 = plt.subplots(figsize=(10, 6))
+        scatter2 = ax2.scatter(
+            cluster_stats['x'], 
+            cluster_stats['y'],
+            s=cluster_stats['clientes'] * 3,
+            c=cluster_stats['pct_comprou'],
+            alpha=0.7,
+            cmap='RdYlGn',
+            edgecolors='black'
+        )
+        
+        ax2.set_title("Clusters de Clientes - Tamanho e Taxa de Compra")
+        ax2.set_xlabel("Idade média")
+        ax2.set_ylabel("Renda média")
+        plt.colorbar(scatter2, ax=ax2, label="Taxa de Compra")
+        st.pyplot(fig2)
 
-    # --------------------------
-    # Análise de quem comprou
-    # --------------------------
-    st.subheader("🛍️ Quem Comprou e o que têm em comum")
-    features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
-    medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
-    st.dataframe(medias)
+        # --------------------------
+        # Análise de quem comprou
+        # --------------------------
+        st.subheader("🛍️ Quem Comprou e o que têm em comum")
+        features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
+        medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
+        st.dataframe(medias)
 
-    # Scatter compradores vs não compradores
-    fig3, ax3 = plt.subplots(figsize=(8,6))
-    sns.scatterplot(
-        x="idade", y="renda",
-        hue="comprou",
-        size="visitas_no_site",
-        data=scored_data,
-        palette={1:"green", 0:"orange", -1:"red"},
-        alpha=0.7,
-        sizes=(20,200)
-    )
-    ax3.set_title("Distribuição de Clientes Compradores vs Não Compradores")
-    st.pyplot(fig3)
+        # Scatter compradores vs não compradores
+        fig3, ax3 = plt.subplots(figsize=(10, 6))
+        colors = {1: "green", 0: "orange", -1: "red"}
+        
+        for compra_status in scored_data["comprou"].unique():
+            subset = scored_data[scored_data["comprou"] == compra_status]
+            ax3.scatter(
+                subset["idade"], 
+                subset["renda"],
+                c=colors.get(compra_status, 'blue'),
+                s=subset["visitas_no_site"] * 10,
+                alpha=0.6,
+                label=f"Comprou: {compra_status}"
+            )
+        
+        ax3.set_title("Distribuição de Clientes Compradores vs Não Compradores")
+        ax3.set_xlabel("Idade")
+        ax3.set_ylabel("Renda")
+        ax3.legend()
+        st.pyplot(fig3)
 
-    # Gráfico de barras comparando médias
-    fig4, ax4 = plt.subplots(figsize=(10,5))
-    medias.T.plot(kind="bar", ax=ax4)
-    ax4.set_title("Médias das Features por Grupo de Compra")
-    ax4.set_xlabel("Feature")
-    ax4.set_ylabel("Média")
-    st.pyplot(fig4)
+        # Gráfico de barras comparando médias
+        fig4, ax4 = plt.subplots(figsize=(12, 6))
+        medias.T.plot(kind="bar", ax=ax4)
+        ax4.set_title("Médias das Features por Grupo de Compra")
+        ax4.set_xlabel("Feature")
+        ax4.set_ylabel("Média")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig4)
 
-# Tabela de clusters
-st.subheader("📋 Resumo de Clusters")
-cluster_summary = scored_data.groupby("cluster").agg(
-    Clientes=('cluster', 'count'),
-    Comprou=('comprou','mean')
-).reset_index()
-cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
-st.dataframe(cluster_summary)
+        # Tabela de clusters
+        st.subheader("📋 Resumo de Clusters")
+        cluster_summary = scored_data.groupby("cluster").agg(
+            Clientes=('cluster', 'count'),
+            Comprou=('comprou','mean')
+        ).reset_index()
+        cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
+        cluster_summary["Comprou"] = cluster_summary["Comprou"].round(3)
+        cluster_summary["Percentual"] = cluster_summary["Percentual"].round(1)
+        st.dataframe(cluster_summary)
+
+    except Exception as e:
+        st.error(f"Erro na visualização: {str(e)}")
+        st.write("Detalhes do erro:")
+        st.exception(e)
+
+# Footer
+st.markdown("---")
+st.markdown("💡 **Empathy Data AI** - Transformando dados em insights emocionais")
