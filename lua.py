@@ -8,21 +8,20 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.decomposition import PCA
 import time
-import textwrap  # Já incluso no Python padrão
+import textwrap
 
-# Configuração inicial NO TOPO ABSOLUTO (antes de qualquer st.)
+# Configuração inicial NO TOPO ABSOLUTO
 st.set_page_config(
     page_title="The Moon AI",
     layout="wide",
     initial_sidebar_state="expanded"
-    # Sem 'theme' aqui - use config.toml pra dark mode
 )
 
 # --------------------------
 # Função Empatia
 # --------------------------
 def empathy_function(prob):
-    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)  # mínimo/máximo de 10% e 90%
+    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)
 
 # --------------------------
 # Geração de dataset sintético
@@ -59,8 +58,9 @@ def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
     target = data["comprou"]
     encoded = features.copy()
+    le = LabelEncoder()  # Instanciar uma vez pra consistência
     for col in encoded.select_dtypes(include="object").columns:
-        encoded[col] = LabelEncoder().fit_transform(encoded[col])
+        encoded[col] = le.fit_transform(encoded[col])
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(encoded, target)
     probs = model.predict_proba(encoded)
@@ -82,9 +82,9 @@ def train_and_score(data, n_clusters=6):
 # --------------------------
 # Interface
 # --------------------------
-st.title("💎 The Moon AI - Ilumine os Dados do Seu Negócio")
+st.title("🌖 The Moon AI - Ilumine os Dados do Seu Negócio")
 st.markdown("""
-Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
+Nosso modelo emprega a **Empathy Function** para entender clientes antes de decidir.
 """)
 
 st.sidebar.header("⚙️ Configurações do Público")
@@ -123,6 +123,9 @@ if "df" in st.session_state:
             with st.spinner("Aprendendo com seu público..."):
                 time.sleep(2)
                 model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
+                # Aplicar o mesmo encoding ao scored_data pra visualização
+                for col in scored_data.select_dtypes(include="object").columns:
+                    scored_data[col] = LabelEncoder().fit_transform(scored_data[col])
                 st.session_state["model"] = model
                 st.session_state["scored"] = scored_data
                 st.session_state["clusters"] = clusters
@@ -165,9 +168,7 @@ if "scored" in st.session_state:
 
         # PCA
         encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-        for col in encoded.select_dtypes(include="object").columns:
-            encoded[col] = LabelEncoder().fit_transform(encoded[col])
-        X_scaled = StandardScaler().fit_transform(encoded)
+        X_scaled = StandardScaler().fit_transform(encoded)  # Já encodado, então só escalar
         pcs = PCA(n_components=2).fit_transform(X_scaled)
         st.subheader("📌 PCA com Cluster e Compra")
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -234,6 +235,6 @@ if "scored" in st.session_state:
         st.write("Detalhes do erro:")
         st.exception(e)
 
-# Footer (mantido intacto pra deploy smooth)
+# Footer (mantido intacto)
 st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights emocionais")
+st.markdown("💡 **The Moon AI** - Transformando dados em insights e epifanias. Sua dose de Eureka!)
