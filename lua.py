@@ -8,10 +8,15 @@ from sklearn.cluster import KMeans
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.decomposition import PCA
 import time
-import textwrap  # Novo, mas já incluso em Python padrão, sem alterar requirements
+import textwrap  # Já incluso no Python padrão
 
-st.set_page_config(page_title="The Moon AI", layout="wide", initial_sidebar_state="expanded", theme="dark")  # Tema escuro lunar
-st.markdown("<style>body {background-color: #1a1a2e; color: #e0e0e0;}</style>", unsafe_allow_html=True)  # Estética lunar
+# Configuração inicial NO TOPO ABSOLUTO (antes de qualquer st.)
+st.set_page_config(
+    page_title="The Moon AI",
+    layout="wide",
+    initial_sidebar_state="expanded"
+    # Sem 'theme' aqui - use config.toml pra dark mode
+)
 
 # --------------------------
 # Função Empatia
@@ -135,7 +140,7 @@ if "scored" in st.session_state:
         cluster_names = st.session_state["cluster_names"]
         st.header("3️⃣ Visualize os Resultados")
 
-        # 🔴 Novo: Insights Lunares (Contos Lunares)
+        # Insights Lunares (Contos Lunares)
         st.subheader("🌙 Insights Lunares")
         imp_df = pd.DataFrame({"feature": feat_names, "importance": st.session_state["model"].feature_importances_}).sort_values("importance", ascending=False)
         for _, row in imp_df.head(3).iterrows():
@@ -143,7 +148,7 @@ if "scored" in st.session_state:
             insight = f"🌕 **Insight Lunar**: '{row['feature']}' brilha com {row['importance']:.2f} de importância! Sua correlação com 'comprou' é {corr:.2f}. Considere focar em {row['feature']} para aumentar compras — teste um aumento de 10%!"
             st.write(textwrap.fill(insight, width=70))
 
-        # 🔴 Novo: Interatividade do Mapa da Lua (Seleção de Clusters)
+        # Interatividade do Mapa da Lua (Seleção de Clusters)
         st.subheader("📍 Mapa da Lua - Explore Clusters")
         selected_cluster = st.selectbox("Escolha um Cluster", options=cluster_names.values())
         cluster_id = [k for k, v in cluster_names.items() if v == selected_cluster][0]
