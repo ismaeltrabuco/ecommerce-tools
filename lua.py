@@ -20,64 +20,114 @@ st.set_page_config(
 # --------------------------
 # Função Empatia
 # --------------------------
-def empathy_function(prob):
-    return np.clip(prob * 0.9 + 0.05, 0.1, 0.9)
+def empathy_function(y_t, o_t, lambda_val=0.1):
+    """
+    Ajusta o estado interno y_t com base no feedback externo o_t usando covariância.
+    y_t: estado atual (ex.: probabilidades preditas)
+    o_t: observações externas (ex.: rótulos reais)
+    lambda_val: fator de sensibilidade (default: 0.1)
+    """
+    try:
+        # Validar entradas
+        if not isinstance(y_t, (list, np.ndarray)) or not isinstance(o_t, (list, np.ndarray)):
+            raise ValueError("y_t e o_t devem ser listas ou arrays numpy.")
+        if len(y_t) != len(o_t) or len(y_t) == 0:
+            raise ValueError("y_t e o_t devem ter o mesmo comprimento e não podem estar vazios.")
+        
+        # Converter pra numpy arrays e garantir tipo float
+        y_t = np.array(y_t, dtype=float)
+        o_t = np.array(o_t, dtype=float)
+        
+        # Tratar valores NaN ou infinitos
+        if np.any(np.isnan(y_t)) or np.any(np.isnan(o_t)) or np.any(np.isinf(y_t)) or np.any(np.isinf(o_t)):
+            y_t = np.nan_to_num(y_t, nan=0.0, posinf=1.0, neginf=-1.0)
+            o_t = np.nan_to_num(o_t, nan=0.0, posinf=1.0, neginf=-1.0)
+        
+        # Calcular covariância (clipada pra estabilidade)
+        cov = np.cov(y_t, o_t)[0, 1]
+        cov = np.clip(cov, -1.0, 1.0)  # Limitar pra evitar explosões
+        
+        # Atualizar estado com feedback alignment
+        y_t_plus_1 = y_t + lambda_val * cov
+        
+        # Clipping pra manter valores entre 0.1 e 0.9
+        return np.clip(y_t_plus_1, 0.1, 0.9)
+    except Exception as e:
+        st.error(f"Erro na Empathy Function: {str(e)}")
+        return y_t  # Retornar o estado original em caso de falha
 
 # --------------------------
 # Geração de dataset sintético
 # --------------------------
 def generate_customers(n, idade_m, renda_m, visitas_m):
     np.random.seed(42)
-    data = pd.DataFrame({
-        "idade": np.random.normal(idade_m, 5, n).astype(int).clip(18, 65),
-        "renda": np.random.normal(renda_m, renda_m*0.2, n).astype(int).clip(500, 50000),
-        "classe_social": np.random.choice(["A", "B", "C", "D"], n),
-        "genero": np.random.choice(["M", "F", "O"], n),
-        "fase_da_lua": np.random.choice(["Nova", "Cheia", "Minguante", "Crescente"], n),
-        "visitas_no_site": np.random.poisson(visitas_m, n),
-        "cliques_redes_sociais": np.random.poisson(3, n),
-        "visitante_retorno": np.random.choice([0, 1], n),
-        "tempo_no_site": np.random.normal(10, 4, n).clip(1, 60),
-        "newsletter_signed": np.random.choice([0, 1], n)
-    })
-    probs = (
-        0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
-        + 0.2 * data["visitante_retorno"]
-        + 0.2 * data["newsletter_signed"]
-        + 0.1 * (data["visitas_no_site"] / (1 + data["visitas_no_site"].max()))
-    )
-    probs = empathy_function(probs)
-    y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
-    data["comprou"] = y
-    return data
+    try:
+        data = pd.DataFrame({
+            "idade": np.random.normal(idade_m, 5, n).astype(int).clip(18, 65),
+            "renda": np.random.normal(renda_m, renda_m*0.2, n).astype(int).clip(500, 50000),
+            "classe_social": np.random.choice(["A", "B", "C", "D"], n),
+            "genero": np.random.choice(["M", "F", "O"], n),
+            "fase_da_lua": np.random.choice(["Nova", "Cheia", "Minguante", "Crescente"], n),
+            "visitas_no_site": np.random.poisson(visitas_m, n),
+            "cliques_redes_sociais": np.random.poisson(3, n),
+            "visitante_retorno": np.random.choice([0, 1], n),
+            "tempo_no_site": np.random.normal(10, 4, n).clip(1, 60),
+            "newsletter_signed": np.random.choice([0, 1], n)
+        })
+        # Calcular probabilidades iniciais
+        probs = (
+            0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
+            + 0.2 * data["visitante_retorno"]
+            + 0.2 * data["newsletter_signed"]
+            + 0.1 * (data["visitas_no_site"] / (1 + data["visitas_no_site"].max()))
+        )
+        # Simular o_t como rótulos iniciais (binarizar probs > 0.5)
+        o_t = (probs > 0.5).astype(float)
+        # Ajustar probs com empathy function
+        y_t = probs.values
+        probs = empathy_function(y_t, o_t, lambda_val=0.1)
+        y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
+        data["comprou"] = y
+        return data
+    except Exception as e:
+        st.error(f"Erro ao gerar dados: {str(e)}")
+        return pd.DataFrame()  # Retornar DataFrame vazio em caso de falha
 
 # --------------------------
 # Treino e score
 # --------------------------
 def train_and_score(data, n_clusters=6):
-    features = data.drop(columns=["comprou"])
-    target = data["comprou"]
-    encoded = features.copy()
-    le = LabelEncoder()  # Instanciar uma vez pra consistência
-    for col in encoded.select_dtypes(include="object").columns:
-        encoded[col] = le.fit_transform(encoded[col])
-    model = RandomForestClassifier(n_estimators=100, random_state=42)
-    model.fit(encoded, target)
-    probs = model.predict_proba(encoded)
-    max_probs = probs.max(axis=1)
-    scaled_scores = (max_probs * 5).round().astype(int)
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(encoded)
-    kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-    clusters = kmeans.fit_predict(X_scaled)
-    data["cluster"] = clusters
-    cluster_profiles = data.groupby("cluster")[["idade", "renda", "visitas_no_site", "comprou"]].mean().round(2)
-    cluster_names = {}
-    for c, row in cluster_profiles.iterrows():
-        compra_pct = int(row['comprou'] * 100)
-        cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
-    data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
-    return model, data, encoded.columns, clusters, cluster_names
+    try:
+        features = data.drop(columns=["comprou"])
+        target = data["comprou"]
+        encoded = features.copy()
+        le = LabelEncoder()  # Instanciar uma vez pra consistência
+        for col in encoded.select_dtypes(include="object").columns:
+            encoded[col] = le.fit_transform(encoded[col])
+        model = RandomForestClassifier(n_estimators=100, random_state=42)
+        model.fit(encoded, target)
+        probs = model.predict_proba(encoded)
+        max_probs = probs.max(axis=1)
+        # Ajuste com empathy function usando rótulos reais
+        o_t = target.values
+        y_t = max_probs
+        adjusted_probs = empathy_function(y_t, o_t, lambda_val=0.05)
+        scaled_scores = (adjusted_probs * 5).round().astype(int)
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(encoded)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        clusters = kmeans.fit_predict(X_scaled)
+        data["cluster"] = clusters
+        cluster_profiles = data.groupby("cluster")[["idade", "renda", "visitas_no_site", "comprou"]].mean().round(2)
+        cluster_names = {}
+        for c, row in cluster_profiles.iterrows():
+            compra_pct = int(row['comprou'] * 100)
+            cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
+        data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
+        return model, data, encoded.columns, clusters, cluster_names
+    except Exception as e:
+        st.error(f"Erro ao treinar modelo: {str(e)}")
+        return None, data, [], [], {}  # Retornar valores padrão em caso de falha
 
 # --------------------------
 # Interface
@@ -92,6 +142,7 @@ idade_m = st.sidebar.slider("Idade média", 18, 65, 30)
 renda_m = st.sidebar.slider("Renda média (R$)", 1000, 20000, 5000, step=500)
 visitas_m = st.sidebar.slider("Visitas médias no site", 1, 20, 5)
 n = st.sidebar.slider("Número de clientes", 50, 1000, 200)
+lambda_val = st.sidebar.slider("Sensibilidade da Empathy Function", 0.01, 0.2, 0.1, 0.01)  # Adicionar controle
 
 # --------------------------
 # Gerar Dados
@@ -100,16 +151,17 @@ st.header("1️⃣ Gere um Banco de Dados")
 if st.button("Gerar Dados"):
     try:
         data = generate_customers(n, idade_m, renda_m, visitas_m)
-        st.session_state["df"] = data
-        st.success("✅ Banco de dados gerado!")
-        st.dataframe(data.head())
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
-        with col2:
-            st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
-        with col3:
-            st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
+        if not data.empty:
+            st.session_state["df"] = data
+            st.success("✅ Banco de dados gerado!")
+            st.dataframe(data.head())
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
+            with col2:
+                st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
+            with col3:
+                st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
     except Exception as e:
         st.error(f"Erro ao gerar dados: {str(e)}")
 
@@ -123,15 +175,16 @@ if "df" in st.session_state:
             with st.spinner("Aprendendo com seu público..."):
                 time.sleep(2)
                 model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
-                # Aplicar o mesmo encoding ao scored_data pra visualização
-                for col in scored_data.select_dtypes(include="object").columns:
-                    scored_data[col] = LabelEncoder().fit_transform(scored_data[col])
-                st.session_state["model"] = model
-                st.session_state["scored"] = scored_data
-                st.session_state["feat_names"] = feat_names  # Salvar feat_names
-                st.session_state["clusters"] = clusters
-                st.session_state["cluster_names"] = cluster_names
-            st.success("✅ Modelo treinado com sucesso!")
+                if model is not None:
+                    # Aplicar o mesmo encoding ao scored_data pra visualização
+                    for col in scored_data.select_dtypes(include="object").columns:
+                        scored_data[col] = LabelEncoder().fit_transform(scored_data[col])
+                    st.session_state["model"] = model
+                    st.session_state["scored"] = scored_data
+                    st.session_state["feat_names"] = feat_names
+                    st.session_state["clusters"] = clusters
+                    st.session_state["cluster_names"] = cluster_names
+                    st.success("✅ Modelo treinado com sucesso!")
         except Exception as e:
             st.error(f"Erro ao treinar modelo: {str(e)}")
 
@@ -142,7 +195,7 @@ if "scored" in st.session_state:
     try:
         scored_data = st.session_state["scored"]
         cluster_names = st.session_state["cluster_names"]
-        feat_names = st.session_state["feat_names"]  # Usar feat_names salvo
+        feat_names = st.session_state["feat_names"]
         st.header("3️⃣ Visualize os Resultados")
 
         # Insights Lunares (Contos Lunares)
@@ -150,7 +203,11 @@ if "scored" in st.session_state:
         imp_df = pd.DataFrame({"feature": feat_names, "importance": st.session_state["model"].feature_importances_}).sort_values("importance", ascending=False)
         for _, row in imp_df.head(3).iterrows():
             corr = scored_data[row["feature"]].corr(scored_data["comprou"])
-            insight = f"🌕 **Insight Lunar**: '{row['feature']}' brilha com {row['importance']:.2f} de importância! Sua correlação com 'comprou' é {corr:.2f}. Considere focar em {row['feature']} para aumentar compras — teste um aumento de 10%!"
+            # Calcular Lunar Alignment Score
+            y_t = st.session_state["model"].predict_proba(scored_data[feat_names])[:, 1]  # Probabilidades da classe positiva
+            o_t = scored_data["comprou"].values
+            lunar_score = np.cov(y_t, o_t)[0, 1] if len(y_t) > 1 else 0.0
+            insight = f"🌕 **Insight Lunar**: '{row['feature']}' brilha com {row['importance']:.2f} de importância! Sua correlação com 'comprou' é {corr:.2f}. Lunar Alignment: {lunar_score:.2f}. Considere focar em {row['feature']} para aumentar compras — teste um aumento de 10%!"
             st.write(textwrap.fill(insight, width=70))
 
         # Interatividade do Mapa da Lua (Seleção de Clusters)
@@ -170,7 +227,7 @@ if "scored" in st.session_state:
 
         # PCA
         encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-        X_scaled = StandardScaler().fit_transform(encoded)  # Já encodado, só escalar
+        X_scaled = StandardScaler().fit_transform(encoded)
         pcs = PCA(n_components=2).fit_transform(X_scaled)
         st.subheader("📌 PCA com Cluster e Compra")
         fig, ax = plt.subplots(figsize=(10, 6))
