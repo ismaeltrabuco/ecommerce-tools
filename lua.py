@@ -269,4 +269,29 @@ if "scored" in st.session_state:
         ax3.set_ylabel("Renda")
         ax3.legend()
         st.pyplot(fig3)
-        fig
+        fig4, ax4 = plt.subplots(figsize=(12, 6))
+        medias.T.plot(kind="bar", ax=ax4)
+        ax4.set_title("Médias das Features por Grupo de Compra")
+        ax4.set_xlabel("Feature")
+        ax4.set_ylabel("Média")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig4)
+
+        # Grupos de Clientes ou Visitantes
+        st.subheader("📋 Grupos de Clientes ou Visitantes")
+        cluster_summary = scored_data.groupby("cluster").agg(
+            Clientes=('cluster', 'count'), Comprou=('comprou', 'mean')
+        ).reset_index()
+        cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
+        cluster_summary["Comprou"] = cluster_summary["Comprou"].round(3)
+        cluster_summary["Percentual"] = cluster_summary["Percentual"].round(1)
+        st.dataframe(cluster_summary)
+    except Exception as e:
+        st.error(f"Erro na visualização: {str(e)}")
+        st.write("Detalhes do erro:")
+        st.exception(e)
+
+# Footer (mantido intacto)
+st.markdown("---")
+st.markdown("💡 **The Moon AI** - Transformando dados em insights e Eurekas!")
