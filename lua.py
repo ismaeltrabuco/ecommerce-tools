@@ -237,4 +237,4 @@ if "scored" in st.session_state:
 
 # Footer (mantido intacto)
 st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights e epifanias. Sua dose de Eureka!)
+st.markdown("💡 **The Moon AI** - Transformando dados em insights e epifanias. Sua dose de Eureka!")
