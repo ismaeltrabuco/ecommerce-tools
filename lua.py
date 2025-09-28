@@ -82,9 +82,9 @@ def train_and_score(data, n_clusters=6):
 # --------------------------
 # Interface
 # --------------------------
-st.title("🌖 The Moon AI - Ilumine os Dados do Seu Negócio")
+st.title("💎 The Moon AI - Ilumine os Dados do Seu Negócio")
 st.markdown("""
-Nosso modelo emprega a **Empathy Function** para entender clientes antes de decidir.
+Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
 """)
 
 st.sidebar.header("⚙️ Configurações do Público")
@@ -128,6 +128,7 @@ if "df" in st.session_state:
                     scored_data[col] = LabelEncoder().fit_transform(scored_data[col])
                 st.session_state["model"] = model
                 st.session_state["scored"] = scored_data
+                st.session_state["feat_names"] = feat_names  # Salvar feat_names
                 st.session_state["clusters"] = clusters
                 st.session_state["cluster_names"] = cluster_names
             st.success("✅ Modelo treinado com sucesso!")
@@ -141,6 +142,7 @@ if "scored" in st.session_state:
     try:
         scored_data = st.session_state["scored"]
         cluster_names = st.session_state["cluster_names"]
+        feat_names = st.session_state["feat_names"]  # Usar feat_names salvo
         st.header("3️⃣ Visualize os Resultados")
 
         # Insights Lunares (Contos Lunares)
@@ -168,7 +170,7 @@ if "scored" in st.session_state:
 
         # PCA
         encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-        X_scaled = StandardScaler().fit_transform(encoded)  # Já encodado, então só escalar
+        X_scaled = StandardScaler().fit_transform(encoded)  # Já encodado, só escalar
         pcs = PCA(n_components=2).fit_transform(X_scaled)
         st.subheader("📌 PCA com Cluster e Compra")
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -237,4 +239,4 @@ if "scored" in st.session_state:
 
 # Footer (mantido intacto)
 st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights e epifanias. Sua dose de Eureka!")
+st.markdown("💡 **The Moon AI** - Transformando dados em insights emocionais")
