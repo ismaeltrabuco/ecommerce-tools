@@ -3,14 +3,15 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.decomposition import PCA
 import time
+import textwrap  # Novo, mas já incluso em Python padrão, sem alterar requirements
 
-st.set_page_config(page_title="Empathy Data AI", layout="wide")
+st.set_page_config(page_title="The Moon AI", layout="wide", initial_sidebar_state="expanded", theme="dark")  # Tema escuro lunar
+st.markdown("<style>body {background-color: #1a1a2e; color: #e0e0e0;}</style>", unsafe_allow_html=True)  # Estética lunar
 
 # --------------------------
 # Função Empatia
@@ -35,7 +36,6 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
         "tempo_no_site": np.random.normal(10, 4, n).clip(1, 60),
         "newsletter_signed": np.random.choice([0, 1], n)
     })
-
     probs = (
         0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
         + 0.2 * data["visitante_retorno"]
@@ -45,7 +45,6 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
     probs = empathy_function(probs)
     y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
     data["comprou"] = y
-
     return data
 
 # --------------------------
@@ -54,38 +53,31 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
 def train_and_score(data, n_clusters=6):
     features = data.drop(columns=["comprou"])
     target = data["comprou"]
-
     encoded = features.copy()
     for col in encoded.select_dtypes(include="object").columns:
         encoded[col] = LabelEncoder().fit_transform(encoded[col])
-
     model = RandomForestClassifier(n_estimators=100, random_state=42)
     model.fit(encoded, target)
-
     probs = model.predict_proba(encoded)
     max_probs = probs.max(axis=1)
     scaled_scores = (max_probs * 5).round().astype(int)
-
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(encoded)
     kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
     clusters = kmeans.fit_predict(X_scaled)
     data["cluster"] = clusters
-
-    cluster_profiles = data.groupby("cluster")[["idade","renda","visitas_no_site","comprou"]].mean().round(2)
+    cluster_profiles = data.groupby("cluster")[["idade", "renda", "visitas_no_site", "comprou"]].mean().round(2)
     cluster_names = {}
     for c, row in cluster_profiles.iterrows():
-        compra_pct = int(row['comprou']*100)
+        compra_pct = int(row['comprou'] * 100)
         cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
-
     data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
-
     return model, data, encoded.columns, clusters, cluster_names
 
 # --------------------------
 # Interface
 # --------------------------
-st.title("💎 Seu negócio precisa de Inteligência Artificial")
+st.title("💎 The Moon AI - Ilumine os Dados do Seu Negócio")
 st.markdown("""
 Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
 """)
@@ -106,7 +98,6 @@ if st.button("Gerar Dados"):
         st.session_state["df"] = data
         st.success("✅ Banco de dados gerado!")
         st.dataframe(data.head())
-        
         col1, col2, col3 = st.columns(3)
         with col1:
             st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
@@ -142,14 +133,28 @@ if "scored" in st.session_state:
     try:
         scored_data = st.session_state["scored"]
         cluster_names = st.session_state["cluster_names"]
-
         st.header("3️⃣ Visualize os Resultados")
 
+        # 🔴 Novo: Insights Lunares (Contos Lunares)
+        st.subheader("🌙 Insights Lunares")
+        imp_df = pd.DataFrame({"feature": feat_names, "importance": st.session_state["model"].feature_importances_}).sort_values("importance", ascending=False)
+        for _, row in imp_df.head(3).iterrows():
+            corr = scored_data[row["feature"]].corr(scored_data["comprou"])
+            insight = f"🌕 **Insight Lunar**: '{row['feature']}' brilha com {row['importance']:.2f} de importância! Sua correlação com 'comprou' é {corr:.2f}. Considere focar em {row['feature']} para aumentar compras — teste um aumento de 10%!"
+            st.write(textwrap.fill(insight, width=70))
+
+        # 🔴 Novo: Interatividade do Mapa da Lua (Seleção de Clusters)
+        st.subheader("📍 Mapa da Lua - Explore Clusters")
+        selected_cluster = st.selectbox("Escolha um Cluster", options=cluster_names.values())
+        cluster_id = [k for k, v in cluster_names.items() if v == selected_cluster][0]
+        cluster_data = scored_data[scored_data["cluster"] == cluster_id]
+        st.dataframe(cluster_data[["idade", "renda", "visitas_no_site", "comprou"]].describe())
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.scatter(cluster_data["idade"], cluster_data["renda"], c=cluster_data["comprou"], cmap="RdYlGn")
+        ax.set_title(f"Cluster {cluster_id} - Distribuição")
+        st.pyplot(fig)
+
         # Importância das features
-        importances = st.session_state["model"].feature_importances_
-        feat_names = [col for col in scored_data.columns if col not in ["comprou", "score_final", "cluster"]]
-        imp_df = pd.DataFrame({"feature": feat_names, "importance": importances}).sort_values("importance", ascending=False)
-        
         st.subheader("🔥 Importância das Features")
         st.bar_chart(imp_df.set_index("feature"))
 
@@ -157,22 +162,11 @@ if "scored" in st.session_state:
         encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
         for col in encoded.select_dtypes(include="object").columns:
             encoded[col] = LabelEncoder().fit_transform(encoded[col])
-        
         X_scaled = StandardScaler().fit_transform(encoded)
         pcs = PCA(n_components=2).fit_transform(X_scaled)
-
         st.subheader("📌 PCA com Cluster e Compra")
         fig, ax = plt.subplots(figsize=(10, 6))
-        plt.style.use('default')
-        
-        scatter = ax.scatter(
-            pcs[:, 0], pcs[:, 1],
-            c=scored_data["cluster"],
-            s=60,
-            alpha=0.7,
-            cmap='tab10'
-        )
-        
+        scatter = ax.scatter(pcs[:, 0], pcs[:, 1], c=scored_data["cluster"], s=60, alpha=0.7, cmap='tab10')
         ax.set_title("Mapa de Clientes por PCA e Cluster")
         ax.set_xlabel("Componente Principal 1")
         ax.set_ylabel("Componente Principal 2")
@@ -182,59 +176,35 @@ if "scored" in st.session_state:
         # Clusters como bolhas
         st.subheader("📊 Clusters como Bolhas")
         cluster_stats = scored_data.groupby("cluster").agg(
-            x=('idade','mean'),
-            y=('renda','mean'),
-            pct_comprou=('comprou','mean'),
-            clientes=('cluster','count')
+            x=('idade', 'mean'), y=('renda', 'mean'), pct_comprou=('comprou', 'mean'), clientes=('cluster', 'count')
         ).reset_index()
-
         fig2, ax2 = plt.subplots(figsize=(10, 6))
         scatter2 = ax2.scatter(
-            cluster_stats['x'], 
-            cluster_stats['y'],
-            s=cluster_stats['clientes'] * 3,
-            c=cluster_stats['pct_comprou'],
-            alpha=0.7,
-            cmap='RdYlGn',
-            edgecolors='black'
+            cluster_stats['x'], cluster_stats['y'], s=cluster_stats['clientes'] * 3, c=cluster_stats['pct_comprou'],
+            alpha=0.7, cmap='RdYlGn', edgecolors='black'
         )
-        
         ax2.set_title("Clusters de Clientes - Tamanho e Taxa de Compra")
         ax2.set_xlabel("Idade média")
         ax2.set_ylabel("Renda média")
         plt.colorbar(scatter2, ax=ax2, label="Taxa de Compra")
         st.pyplot(fig2)
 
-        # --------------------------
         # Análise de quem comprou
-        # --------------------------
         st.subheader("🛍️ Quem Comprou e o que têm em comum")
         features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
         medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
         st.dataframe(medias)
-
-        # Scatter compradores vs não compradores
         fig3, ax3 = plt.subplots(figsize=(10, 6))
         colors = {1: "green", 0: "orange", -1: "red"}
-        
         for compra_status in scored_data["comprou"].unique():
             subset = scored_data[scored_data["comprou"] == compra_status]
-            ax3.scatter(
-                subset["idade"], 
-                subset["renda"],
-                c=colors.get(compra_status, 'blue'),
-                s=subset["visitas_no_site"] * 10,
-                alpha=0.6,
-                label=f"Comprou: {compra_status}"
-            )
-        
+            ax3.scatter(subset["idade"], subset["renda"], c=colors.get(compra_status, 'blue'), s=subset["visitas_no_site"] * 10,
+                        alpha=0.6, label=f"Comprou: {compra_status}")
         ax3.set_title("Distribuição de Clientes Compradores vs Não Compradores")
         ax3.set_xlabel("Idade")
         ax3.set_ylabel("Renda")
         ax3.legend()
         st.pyplot(fig3)
-
-        # Gráfico de barras comparando médias
         fig4, ax4 = plt.subplots(figsize=(12, 6))
         medias.T.plot(kind="bar", ax=ax4)
         ax4.set_title("Médias das Features por Grupo de Compra")
@@ -244,11 +214,10 @@ if "scored" in st.session_state:
         plt.tight_layout()
         st.pyplot(fig4)
 
-        # Tabela de clusters
+        # Resumo de Clusters
         st.subheader("📋 Resumo de Clusters")
         cluster_summary = scored_data.groupby("cluster").agg(
-            Clientes=('cluster', 'count'),
-            Comprou=('comprou','mean')
+            Clientes=('cluster', 'count'), Comprou=('comprou', 'mean')
         ).reset_index()
         cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
         cluster_summary["Comprou"] = cluster_summary["Comprou"].round(3)
@@ -260,6 +229,6 @@ if "scored" in st.session_state:
         st.write("Detalhes do erro:")
         st.exception(e)
 
-# Footer
+# Footer (mantido intacto pra deploy smooth)
 st.markdown("---")
-st.markdown("💡 **Empathy Data AI** - Transformando dados em insights emocionais")
+st.markdown("💡 **The Moon AI** - Transformando dados em insights emocionais")
