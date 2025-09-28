@@ -39,13 +39,12 @@ def empathy_function(y_t, o_t, lambda_val=0.1):
         o_t = np.array(o_t, dtype=float)
         
         # Tratar valores NaN ou infinitos
-        if np.any(np.isnan(y_t)) or np.any(np.isnan(o_t)) or np.any(np.isinf(y_t)) or np.any(np.isinf(o_t)):
-            y_t = np.nan_to_num(y_t, nan=0.0, posinf=1.0, neginf=-1.0)
-            o_t = np.nan_to_num(o_t, nan=0.0, posinf=1.0, neginf=-1.0)
+        y_t = np.nan_to_num(y_t, nan=0.0, posinf=1.0, neginf=-1.0)
+        o_t = np.nan_to_num(o_t, nan=0.0, posinf=1.0, neginf=-1.0)
         
         # Calcular covariância (clipada pra estabilidade)
-        cov = np.cov(y_t, o_t)[0, 1]
-        cov = np.clip(cov, -1.0, 1.0)  # Limitar pra evitar explosões
+        cov = np.cov(y_t, o_t)[0, 1] if len(y_t) > 1 else 0.0
+        cov = np.clip(cov, -1.0, 1.0)
         
         # Atualizar estado com feedback alignment
         y_t_plus_1 = y_t + lambda_val * cov
@@ -76,16 +75,20 @@ def generate_customers(n, idade_m, renda_m, visitas_m):
         })
         # Calcular probabilidades iniciais
         probs = (
-            0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}))
+            0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}).fillna(0.5))
             + 0.2 * data["visitante_retorno"]
             + 0.2 * data["newsletter_signed"]
             + 0.1 * (data["visitas_no_site"] / (1 + data["visitas_no_site"].max()))
         )
-        # Simular o_t como rótulos iniciais (binarizar probs > 0.5)
-        o_t = (probs > 0.5).astype(float)
+        # Simular o_t como rótulos iniciais (binarizar probs > 0.5), garantindo compatibilidade
+        o_t = (probs > 0.5).astype(float).values
         # Ajustar probs com empathy function
         y_t = probs.values
-        probs = empathy_function(y_t, o_t, lambda_val=0.1)
+        if len(y_t) == len(o_t):
+            probs = empathy_function(y_t, o_t, lambda_val=0.1)
+        else:
+            st.warning("Dimensões incompatíveis em empathy_function, usando probs originais.")
+            probs = y_t
         y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
         data["comprou"] = y
         return data
@@ -221,10 +224,6 @@ if "scored" in st.session_state:
         ax.set_title(f"Cluster {cluster_id} - Distribuição")
         st.pyplot(fig)
 
-        # Importância das features
-        st.subheader("🔥 Importância das Features")
-        st.bar_chart(imp_df.set_index("feature"))
-
         # PCA
         encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
         X_scaled = StandardScaler().fit_transform(encoded)
@@ -270,30 +269,4 @@ if "scored" in st.session_state:
         ax3.set_ylabel("Renda")
         ax3.legend()
         st.pyplot(fig3)
-        fig4, ax4 = plt.subplots(figsize=(12, 6))
-        medias.T.plot(kind="bar", ax=ax4)
-        ax4.set_title("Médias das Features por Grupo de Compra")
-        ax4.set_xlabel("Feature")
-        ax4.set_ylabel("Média")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig4)
-
-        # Resumo de Clusters
-        st.subheader("📋 Resumo de Clusters")
-        cluster_summary = scored_data.groupby("cluster").agg(
-            Clientes=('cluster', 'count'), Comprou=('comprou', 'mean')
-        ).reset_index()
-        cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
-        cluster_summary["Comprou"] = cluster_summary["Comprou"].round(3)
-        cluster_summary["Percentual"] = cluster_summary["Percentual"].round(1)
-        st.dataframe(cluster_summary)
-
-    except Exception as e:
-        st.error(f"Erro na visualização: {str(e)}")
-        st.write("Detalhes do erro:")
-        st.exception(e)
-
-# Footer (mantido intacto)
-st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights e Eurekas!")
+        fig
