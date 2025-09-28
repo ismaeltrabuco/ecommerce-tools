@@ -82,7 +82,7 @@ def train_and_score(data, n_clusters=6):
 # --------------------------
 # Interface
 # --------------------------
-st.title("💎 The Moon AI - Ilumine os Dados do Seu Negócio")
+st.title("🌖 The Moon AI - Ilumine os Dados do Seu Negócio")
 st.markdown("""
 Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
 """)
@@ -239,4 +239,4 @@ if "scored" in st.session_state:
 
 # Footer (mantido intacto)
 st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights emocionais")
+st.markdown("💡 **The Moon AI** - Transformando dados em insights e Eurekas!")
