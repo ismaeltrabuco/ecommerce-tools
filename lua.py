@@ -7,291 +7,485 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.cluster import KMeans
 from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.decomposition import PCA
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 import time
 import textwrap
 
 # Configuração inicial NO TOPO ABSOLUTO
 st.set_page_config(
-    page_title="The Moon AI",
+    page_title="Spectra AI - E-PINN System",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
 # --------------------------
-# Função Empatia
+# E-PINN Architecture
 # --------------------------
-def empathy_function(y_t, o_t, lambda_val=0.1):
-    """
-    Ajusta o estado interno y_t com base no feedback externo o_t usando covariância.
-    y_t: estado atual (ex.: probabilidades preditas)
-    o_t: observações externas (ex.: rótulos reais)
-    lambda_val: fator de sensibilidade (default: 0.1)
-    """
-    try:
-        # Validar entradas
-        if not isinstance(y_t, (list, np.ndarray)) or not isinstance(o_t, (list, np.ndarray)):
-            raise ValueError("y_t e o_t devem ser listas ou arrays numpy.")
-        if len(y_t) != len(o_t) or len(y_t) == 0:
-            raise ValueError("y_t e o_t devem ter o mesmo comprimento e não podem estar vazios.")
-        
-        # Converter pra numpy arrays e garantir tipo float
-        y_t = np.array(y_t, dtype=float)
-        o_t = np.array(o_t, dtype=float)
-        
-        # Tratar valores NaN ou infinitos
-        y_t = np.nan_to_num(y_t, nan=0.0, posinf=1.0, neginf=-1.0)
-        o_t = np.nan_to_num(o_t, nan=0.0, posinf=1.0, neginf=-1.0)
-        
-        # Calcular covariância (clipada pra estabilidade)
-        cov = np.cov(y_t, o_t)[0, 1] if len(y_t) > 1 else 0.0
-        cov = np.clip(cov, -1.0, 1.0)
-        
-        # Atualizar estado com feedback alignment
-        y_t_plus_1 = y_t + lambda_val * cov
-        
-        # Clipping pra manter valores entre 0.1 e 0.9
-        return np.clip(y_t_plus_1, 0.1, 0.9)
-    except Exception as e:
-        st.error(f"Erro na Empathy Function: {str(e)}")
-        return y_t  # Retornar o estado original em caso de falha
+def build_epinn_model(input_dim, num_segments):
+    """Constrói a arquitetura E-PINN (Empathetic Physics-Informed Neural Network)"""
+    inputs = keras.Input(shape=(input_dim,))
+    
+    # Camadas compartilhadas (shared representation)
+    x = layers.Dense(64, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(inputs)
+    x = layers.Dropout(0.3)(x)
+    x = layers.Dense(32, activation='relu', kernel_regularizer=keras.regularizers.l2(0.01))(x)
+    shared_output = layers.Dropout(0.3)(x)
+    
+    # Regression Head (Propensity Score 1-5)
+    regression_head = layers.Dense(16, activation='relu')(shared_output)
+    regression_head = layers.Dropout(0.2)(regression_head)
+    propensity_output = layers.Dense(1, activation='sigmoid', name='propensity')(regression_head)
+    
+    # Classification Head (Customer Segments)
+    classification_head = layers.Dense(16, activation='relu')(shared_output)
+    classification_head = layers.Dropout(0.2)(classification_head)
+    segment_output = layers.Dense(num_segments, activation='softmax', name='segment')(classification_head)
+    
+    model = keras.Model(inputs=inputs, outputs=[propensity_output, segment_output])
+    
+    model.compile(
+        optimizer=keras.optimizers.Adam(learning_rate=0.001),
+        loss={
+            'propensity': 'mse',
+            'segment': 'sparse_categorical_crossentropy'
+        },
+        loss_weights={
+            'propensity': 1.0,
+            'segment': 1.0
+        },
+        metrics={
+            'propensity': ['mae'],
+            'segment': ['accuracy']
+        }
+    )
+    
+    return model
 
 # --------------------------
-# Geração de dataset sintético
+# Advanced Empathy Function
 # --------------------------
-def generate_customers(n, idade_m, renda_m, visitas_m):
+def empathy_function_vectorized(internal_state, external_observations, empathy_lr=0.01):
+    """
+    Função de empatia vetorizada avançada
+    internal_state: estado interno do modelo (y_t)
+    external_observations: observações externas (o_t)
+    empathy_lr: taxa de aprendizado da empatia
+    """
+    try:
+        # Garantir formatos compatíveis
+        if internal_state.ndim == 1:
+            internal_state = internal_state.reshape(-1, 1)
+        if external_observations.ndim == 1:
+            external_observations = external_observations.reshape(-1, 1)
+            
+        # Calcular cross-covariance para empatia
+        if len(internal_state) == len(external_observations):
+            cross_cov = np.cov(internal_state.flatten(), external_observations.flatten())[0, 1]
+        else:
+            min_len = min(len(internal_state), len(external_observations))
+            cross_cov = np.cov(internal_state[:min_len].flatten(), 
+                              external_observations[:min_len].flatten())[0, 1]
+        
+        # Ajuste baseado na empatia
+        empathy_adjustment = empathy_lr * cross_cov
+        
+        return empathy_adjustment
+        
+    except Exception as e:
+        st.error(f"Erro na Empathy Function: {str(e)}")
+        return 0.0
+
+# --------------------------
+# Physics-Informed Features
+# --------------------------
+def calculate_physics_features(data):
+    """Calcula features baseadas em física comportamental"""
+    df = data.copy()
+    
+    # Velocidade comportamental (taxa de engajamento)
+    if 'visitas_no_site' in df.columns and 'tempo_no_site' in df.columns:
+        df['behavioral_velocity'] = df['visitas_no_site'] / (df['tempo_no_site'] + 1)
+    
+    # Aceleração (mudança na taxa de engajamento)
+    if 'cliques_redes_sociais' in df.columns:
+        df['behavioral_acceleration'] = df['cliques_redes_sociais'].diff().fillna(0)
+    
+    # Energia potencial (propensão baseada em características estáveis)
+    if 'renda' in df.columns and 'idade' in df.columns:
+        df['potential_energy'] = (df['renda'] / 1000) * (df['idade'] / 100)
+    
+    return df
+
+# --------------------------
+# Enhanced Data Generation
+# --------------------------
+def generate_enhanced_customers(n, idade_m, renda_m, visitas_m):
+    """Gera dataset sintético avançado com features de física"""
     np.random.seed(42)
     try:
+        # Dados base
         data = pd.DataFrame({
             "idade": np.random.normal(idade_m, 5, n).astype(int).clip(18, 65),
             "renda": np.random.normal(renda_m, renda_m*0.2, n).astype(int).clip(500, 50000),
-            "classe_social": np.random.choice(["A", "B", "C", "D"], n),
-            "genero": np.random.choice(["M", "F", "O"], n),
+            "classe_social": np.random.choice(["A", "B", "C", "D"], n, p=[0.1, 0.3, 0.4, 0.2]),
+            "genero": np.random.choice(["M", "F", "O"], n, p=[0.45, 0.45, 0.1]),
             "fase_da_lua": np.random.choice(["Nova", "Cheia", "Minguante", "Crescente"], n),
             "visitas_no_site": np.random.poisson(visitas_m, n),
             "cliques_redes_sociais": np.random.poisson(3, n),
-            "visitante_retorno": np.random.choice([0, 1], n),
+            "visitante_retorno": np.random.choice([0, 1], n, p=[0.7, 0.3]),
             "tempo_no_site": np.random.normal(10, 4, n).clip(1, 60),
-            "newsletter_signed": np.random.choice([0, 1], n)
+            "newsletter_signed": np.random.choice([0, 1], n, p=[0.6, 0.4]),
+            "minigame_score": np.random.randint(0, 100, n),
+            "pages_visited": np.random.randint(3, 15, n),
+            "device_type": np.random.choice(["Mobile", "Desktop", "Tablet"], n)
         })
-        # Calcular probabilidades iniciais
-        probs = (
-            0.3 * (data["classe_social"].map({"A": 0.8, "B": 0.6, "C": 0.4, "D": 0.2}).fillna(0.5))
-            + 0.2 * data["visitante_retorno"]
-            + 0.2 * data["newsletter_signed"]
-            + 0.1 * (data["visitas_no_site"] / (1 + data["visitas_no_site"].max()))
-        )
-        # Simular o_t como rótulos iniciais (binarizar probs > 0.5), garantindo compatibilidade
-        o_t = (probs > 0.5).astype(float).values
-        # Ajustar probs com empathy function
-        y_t = probs.values
-        if len(y_t) == len(o_t):
-            probs = empathy_function(y_t, o_t, lambda_val=0.1)
-        else:
-            st.warning("Dimensões incompatíveis em empathy_function, usando probs originais.")
-            probs = y_t
-        y = np.where(probs > 0.6, 1, np.where(probs < 0.3, -1, 0))
-        data["comprou"] = y
+        
+        # Adicionar features de física
+        data = calculate_physics_features(data)
+        
+        # Calcular vendas baseadas em relações complexas
+        data['sales'] = (
+            0.03 * data['visitas_no_site'] + 
+            0.1 * data['cliques_redes_sociais'] + 
+            0.5 * data['tempo_no_site'] / 60 +
+            0.8 * data['pages_visited'] +
+            0.7 * data['minigame_score'] +
+            np.random.normal(0, 3, n)
+        ).astype(int).clip(0)
+        
+        # Criar segmentos usando K-Means
+        cluster_features = ['visitas_no_site', 'cliques_redes_sociais', 'tempo_no_site', 
+                           'pages_visited', 'minigame_score', 'sales']
+        X_cluster = data[cluster_features]
+        
+        # Codificar variáveis categóricas para clustering
+        X_encoded = X_cluster.copy()
+        for col in ['device_type']:
+            if col in data.columns:
+                le = LabelEncoder()
+                X_encoded[col] = le.fit_transform(data[col])
+        
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X_encoded)
+        
+        kmeans = KMeans(n_clusters=5, random_state=42, n_init=10)
+        data['customer_segment'] = kmeans.fit_predict(X_scaled)
+        
+        # Criar propensity score (1-5) baseado nas vendas
+        data['propensity_score'] = pd.cut(data['sales'], bins=5, labels=[1, 2, 3, 4, 5]).astype(int)
+        
+        # Gerar IDs no formato "score&segment"
+        data['visitor_id'] = [f"{score}&{segment}" for score, segment in zip(data['propensity_score'], data['customer_segment'])]
+        
         return data
+        
     except Exception as e:
         st.error(f"Erro ao gerar dados: {str(e)}")
-        return pd.DataFrame()  # Retornar DataFrame vazio em caso de falha
+        return pd.DataFrame()
 
 # --------------------------
-# Treino e score
+# Enhanced Training Pipeline
 # --------------------------
-def train_and_score(data, n_clusters=6):
+def train_epinn_pipeline(data, n_segments=5):
+    """Pipeline completo de treino da E-PINN"""
     try:
-        features = data.drop(columns=["comprou"])
-        target = data["comprou"]
-        encoded = features.copy()
-        le = LabelEncoder()  # Instanciar uma vez pra consistência
-        for col in encoded.select_dtypes(include="object").columns:
-            encoded[col] = le.fit_transform(encoded[col])
-        model = RandomForestClassifier(n_estimators=100, random_state=42)
-        model.fit(encoded, target)
-        probs = model.predict_proba(encoded)
-        max_probs = probs.max(axis=1)
-        # Ajuste com empathy function usando rótulos reais
-        o_t = target.values
-        y_t = max_probs
-        adjusted_probs = empathy_function(y_t, o_t, lambda_val=0.05)
-        scaled_scores = (adjusted_probs * 5).round().astype(int)
+        # Preparar features
+        features = ['idade', 'renda', 'visitas_no_site', 'cliques_redes_sociais', 
+                   'tempo_no_site', 'pages_visited', 'minigame_score', 
+                   'behavioral_velocity', 'behavioral_acceleration', 'potential_energy']
+        
+        # Codificar variáveis categóricas
+        X = data[features].copy()
+        for col in ['classe_social', 'genero', 'fase_da_lua', 'device_type']:
+            if col in data.columns:
+                le = LabelEncoder()
+                X[col] = le.fit_transform(data[col])
+        
+        # Targets
+        y_propensity = data['propensity_score']
+        y_segment = data['customer_segment']
+        
+        # Normalizar features
         scaler = StandardScaler()
-        X_scaled = scaler.fit_transform(encoded)
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        clusters = kmeans.fit_predict(X_scaled)
-        data["cluster"] = clusters
-        cluster_profiles = data.groupby("cluster")[["idade", "renda", "visitas_no_site", "comprou"]].mean().round(2)
-        cluster_names = {}
-        for c, row in cluster_profiles.iterrows():
-            compra_pct = int(row['comprou'] * 100)
-            cluster_names[c] = f"Cluster {c+1} - Idade {int(row['idade'])}, Renda R${int(row['renda'])}, Visitas {int(row['visitas_no_site'])}, Comprou {compra_pct}%"
-        data["score_final"] = [f"{s} & {cluster_names[c]}" for s, c in zip(scaled_scores, clusters)]
-        return model, data, encoded.columns, clusters, cluster_names
+        X_scaled = scaler.fit_transform(X)
+        
+        # Construir e treinar E-PINN
+        model = build_epinn_model(X_scaled.shape[1], n_segments)
+        
+        # Treinar o modelo
+        history = model.fit(
+            X_scaled,
+            {
+                'propensity': y_propensity / 5.0,  # Normalizar para 0-1
+                'segment': y_segment
+            },
+            epochs=50,
+            batch_size=32,
+            validation_split=0.2,
+            verbose=0
+        )
+        
+        # Fazer previsões
+        propensity_pred, segment_pred_probs = model.predict(X_scaled, verbose=0)
+        
+        # Ajustar propensão para escala 1-5
+        propensity_pred_scaled = (propensity_pred * 4 + 1).flatten()
+        segment_pred = np.argmax(segment_pred_probs, axis=1)
+        
+        # Adicionar resultados aos dados
+        data['pred_propensity'] = propensity_pred_scaled.round()
+        data['pred_segment'] = segment_pred
+        data['pred_visitor_id'] = [f"{int(score)}&{segment}" for score, segment in zip(propensity_pred_scaled.round(), segment_pred)]
+        
+        return model, data, history, scaler
+        
     except Exception as e:
-        st.error(f"Erro ao treinar modelo: {str(e)}")
-        return None, data, [], [], {}  # Retornar valores padrão em caso de falha
+        st.error(f"Erro no pipeline de treino: {str(e)}")
+        return None, data, None, None
 
 # --------------------------
-# Interface
+# Streamlit Interface
 # --------------------------
-st.title("🌖 The Moon AI - Ilumine os Dados do Seu Negócio")
+st.title("🧠 Spectra AI - E-PINN Customer Intelligence")
 st.markdown("""
-Nossos modelos usam a **Empathy Function** para entender clientes antes de decidir.
+**Sistema E-PINN (Empathetic Physics-Informed Neural Network)** que combina:
+- 🎯 **Aprendizado Multi-tarefa**: Propensão + Segmentação
+- 🌊 **Física Comportamental**: Velocidade, Aceleração, Energia Potencial
+- ❤️ **Função de Empatia**: Alinhamento com feedback do cliente
+- 📊 **Output 3&24**: Propensão (1-5) & Segmento Comportamental
 """)
 
-st.sidebar.header("⚙️ Configurações do Público")
-idade_m = st.sidebar.slider("Idade média", 18, 65, 30)
-renda_m = st.sidebar.slider("Renda média (R$)", 1000, 20000, 5000, step=500)
-visitas_m = st.sidebar.slider("Visitas médias no site", 1, 20, 5)
-n = st.sidebar.slider("Número de clientes", 50, 1000, 200)
-lambda_val = st.sidebar.slider("Sensibilidade da Empathy Function", 0.01, 0.2, 0.1, 0.01)  # Adicionar controle
+# Sidebar
+st.sidebar.header("⚙️ Configurações do Sistema E-PINN")
+idade_m = st.sidebar.slider("Idade média", 18, 65, 35)
+renda_m = st.sidebar.slider("Renda média (R$)", 1000, 20000, 8000, step=500)
+visitas_m = st.sidebar.slider("Visitas médias no site", 1, 20, 8)
+n = st.sidebar.slider("Número de clientes", 100, 2000, 500)
+n_segments = st.sidebar.slider("Número de segmentos", 3, 10, 5)
+empathy_lr = st.sidebar.slider("Taxa de Empatia", 0.001, 0.1, 0.01, 0.001)
 
-# --------------------------
-# Gerar Dados
-# --------------------------
-st.header("1️⃣ Gere um Banco de Dados")
-if st.button("Gerar Dados"):
-    try:
-        data = generate_customers(n, idade_m, renda_m, visitas_m)
-        if not data.empty:
-            st.session_state["df"] = data
-            st.success("✅ Banco de dados gerado!")
-            st.dataframe(data.head())
+# Pipeline Principal
+tab1, tab2, tab3, tab4 = st.tabs(["🚀 Gerar Dados", "🧠 Treinar E-PINN", "📊 Visualizar", "🎯 Prever"])
+
+with tab1:
+    st.header("1. Gerar Base de Dados com Física Comportamental")
+    if st.button("🎲 Gerar Dataset Avançado"):
+        with st.spinner("Criando universo de clientes com física comportamental..."):
+            data = generate_enhanced_customers(n, idade_m, renda_m, visitas_m)
+            if not data.empty:
+                st.session_state["dataset"] = data
+                st.success(f"✅ Dataset gerado com {len(data)} clientes!")
+                
+                # Métricas iniciais
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
+                with col2:
+                    st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
+                with col3:
+                    st.metric("Segmentos Únicos", f"{data['customer_segment'].nunique()}")
+                with col4:
+                    st.metric("IDs 5&99", f"{(data['visitor_id'] == '5&99').sum()}")
+                
+                st.dataframe(data[['visitor_id', 'idade', 'renda', 'propensity_score', 'customer_segment', 'sales']].head(10))
+
+with tab2:
+    st.header("2. Treinar Modelo E-PINN")
+    if "dataset" in st.session_state:
+        if st.button("🧠 Treinar E-PINN"):
+            with st.spinner("Treinando rede neural com empatia e física..."):
+                model, trained_data, history, scaler = train_epinn_pipeline(
+                    st.session_state["dataset"], n_segments
+                )
+                
+                if model is not None:
+                    st.session_state["model"] = model
+                    st.session_state["trained_data"] = trained_data
+                    st.session_state["scaler"] = scaler
+                    st.session_state["training_history"] = history
+                    
+                    st.success("✅ E-PINN treinada com sucesso!")
+                    
+                    # Mostrar métricas de treino
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        final_loss = history.history['loss'][-1]
+                        st.metric("Loss Final", f"{final_loss:.4f}")
+                    with col2:
+                        prop_mae = history.history['propensity_mae'][-1]
+                        st.metric("MAE Propensão", f"{prop_mae:.4f}")
+                    with col3:
+                        seg_acc = history.history['segment_accuracy'][-1]
+                        st.metric("Acurácia Segmento", f"{seg_acc:.3f}")
+                    
+                    # Gráfico de treino
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+                    
+                    ax1.plot(history.history['loss'], label='Train Loss')
+                    ax1.plot(history.history['val_loss'], label='Val Loss')
+                    ax1.set_title('Loss do Modelo')
+                    ax1.legend()
+                    
+                    ax2.plot(history.history['propensity_mae'], label='Propensity MAE')
+                    ax2.plot(history.history['segment_accuracy'], label='Segment Accuracy')
+                    ax2.set_title('Métricas por Tarefa')
+                    ax2.legend()
+                    
+                    st.pyplot(fig)
+    else:
+        st.warning("⚠️ Gere dados primeiro na aba anterior")
+
+with tab3:
+    st.header("3. Visualizar Insights E-PINN")
+    if "trained_data" in st.session_state:
+        data = st.session_state["trained_data"]
+        
+        # Análise de Segmentos
+        st.subheader("🎯 Análise de Segmentos Comportamentais")
+        segment_stats = data.groupby('customer_segment').agg({
+            'idade': 'mean',
+            'renda': 'mean', 
+            'sales': 'mean',
+            'propensity_score': 'mean',
+            'visitor_id': 'count'
+        }).round(2)
+        
+        segment_stats['clientes'] = segment_stats['visitor_id']
+        segment_stats['taxa_conversao'] = (data.groupby('customer_segment')['sales'].mean() / 100).round(3)
+        
+        st.dataframe(segment_stats)
+        
+        # Visualização dos Segmentos
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            scatter = ax.scatter(data['idade'], data['renda'], 
+                               c=data['customer_segment'], cmap='viridis', alpha=0.6)
+            ax.set_xlabel('Idade')
+            ax.set_ylabel('Renda')
+            ax.set_title('Segmentação por Idade e Renda')
+            plt.colorbar(scatter, ax=ax, label='Segmento')
+            st.pyplot(fig)
+        
+        with col2:
+            fig, ax = plt.subplots(figsize=(10, 6))
+            segment_counts = data['customer_segment'].value_counts().sort_index()
+            colors = plt.cm.Set3(np.linspace(0, 1, len(segment_counts)))
+            bars = ax.bar(segment_counts.index.astype(str), segment_counts.values, color=colors)
+            ax.set_xlabel('Segmento')
+            ax.set_ylabel('Número de Clientes')
+            ax.set_title('Distribuição por Segmento')
+            for bar in bars:
+                height = bar.get_height()
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(height)}', ha='center', va='bottom')
+            st.pyplot(fig)
+        
+        # Análise de Propensão
+        st.subheader("📈 Análise de Propensão 1-5")
+        propensity_analysis = data.groupby('propensity_score').agg({
+            'sales': 'mean',
+            'renda': 'mean',
+            'visitas_no_site': 'mean',
+            'visitor_id': 'count'
+        }).round(2)
+        
+        st.dataframe(propensity_analysis)
+        
+        # IDs mais comuns
+        st.subheader("🏆 Top IDs de Visitantes")
+        top_ids = data['visitor_id'].value_counts().head(10)
+        st.write(top_ids)
+
+with tab4:
+    st.header("4. Prever Novo Cliente")
+    if "model" in st.session_state and "scaler" in st.session_state:
+        
+        st.subheader("📝 Informações do Novo Cliente")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            idade = st.number_input("Idade", 18, 65, 30)
+            renda = st.number_input("Renda (R$)", 1000, 50000, 5000)
+            visitas = st.number_input("Visitas no Site", 1, 50, 5)
+            cliques = st.number_input("Cliques Redes Sociais", 0, 100, 10)
+            
+        with col2:
+            tempo_site = st.number_input("Tempo no Site (min)", 1, 120, 15)
+            pages = st.number_input("Páginas Visitadas", 1, 50, 8)
+            minigame = st.number_input("Score Minigame", 0, 100, 50)
+            device = st.selectbox("Dispositivo", ["Mobile", "Desktop", "Tablet"])
+        
+        if st.button("🎯 Prever com E-PINN"):
+            # Preparar features do novo cliente
+            new_customer = pd.DataFrame({
+                'idade': [idade],
+                'renda': [renda],
+                'visitas_no_site': [visitas],
+                'cliques_redes_sociais': [cliques],
+                'tempo_no_site': [tempo_site],
+                'pages_visited': [pages],
+                'minigame_score': [minigame],
+                'device_type': [device]
+            })
+            
+            # Calcular features de física
+            new_customer = calculate_physics_features(new_customer)
+            
+            # Codificar e normalizar
+            for col in ['device_type']:
+                le = LabelEncoder()
+                # Ajustar para dados de treino existentes
+                if col in st.session_state["dataset"].columns:
+                    le.fit(st.session_state["dataset"][col])
+                    new_customer[col] = le.transform(new_customer[col])
+            
+            features = ['idade', 'renda', 'visitas_no_site', 'cliques_redes_sociais', 
+                       'tempo_no_site', 'pages_visited', 'minigame_score',
+                       'behavioral_velocity', 'behavioral_acceleration', 'potential_energy']
+            
+            X_new = new_customer[features]
+            X_scaled = st.session_state["scaler"].transform(X_new)
+            
+            # Fazer previsão
+            propensity_pred, segment_pred_probs = st.session_state["model"].predict(X_scaled, verbose=0)
+            propensity_score = int((propensity_pred[0][0] * 4 + 1).round())
+            segment = int(np.argmax(segment_pred_probs[0]))
+            
+            visitor_id = f"{propensity_score}&{segment}"
+            
+            # Mostrar resultado
+            st.success(f"🎉 **ID do Visitante Previsto: {visitor_id}**")
+            
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Idade Média", f"{data['idade'].mean():.1f} anos")
+                st.metric("Propensão", f"{propensity_score}/5")
             with col2:
-                st.metric("Renda Média", f"R$ {data['renda'].mean():,.0f}")
+                st.metric("Segmento", segment)
             with col3:
-                st.metric("Taxa de Compra", f"{(data['comprou']==1).mean()*100:.1f}%")
-    except Exception as e:
-        st.error(f"Erro ao gerar dados: {str(e)}")
+                st.metric("ID Completo", visitor_id)
+            
+            # Interpretação
+            st.subheader("📋 Interpretação do Resultado")
+            propensity_descriptions = {
+                1: "Baixa propensão - Necessita mais engajamento",
+                2: "Propensão moderadamente baixa",
+                3: "Propensão média - Cliente em consideração", 
+                4: "Propensão alta - Cliente promissor",
+                5: "Propensão muito alta - Cliente ideal"
+            }
+            
+            st.info(f"**Propensão {propensity_score}**: {propensity_descriptions.get(propensity_score, '')}")
+            st.info(f"**Segmento {segment}**: Padrão comportamental específico detectado pela E-PINN")
 
-# --------------------------
-# Treinar Modelo
-# --------------------------
-if "df" in st.session_state:
-    st.header("2️⃣ Treine o Modelo")
-    if st.button("Treinar Agora"):
-        try:
-            with st.spinner("Aprendendo com seu público..."):
-                time.sleep(2)
-                model, scored_data, feat_names, clusters, cluster_names = train_and_score(st.session_state["df"])
-                if model is not None:
-                    # Aplicar o mesmo encoding ao scored_data pra visualização
-                    for col in scored_data.select_dtypes(include="object").columns:
-                        scored_data[col] = LabelEncoder().fit_transform(scored_data[col])
-                    st.session_state["model"] = model
-                    st.session_state["scored"] = scored_data
-                    st.session_state["feat_names"] = feat_names
-                    st.session_state["clusters"] = clusters
-                    st.session_state["cluster_names"] = cluster_names
-                    st.success("✅ Modelo treinado com sucesso!")
-        except Exception as e:
-            st.error(f"Erro ao treinar modelo: {str(e)}")
-
-# --------------------------
-# Visualização
-# --------------------------
-if "scored" in st.session_state:
-    try:
-        scored_data = st.session_state["scored"]
-        cluster_names = st.session_state["cluster_names"]
-        feat_names = st.session_state["feat_names"]
-        st.header("3️⃣ Visualize os Resultados")
-
-        # Insights Lunares (Contos Lunares)
-        st.subheader("🌙 Insights Lunares")
-        imp_df = pd.DataFrame({"feature": feat_names, "importance": st.session_state["model"].feature_importances_}).sort_values("importance", ascending=False)
-        for _, row in imp_df.head(3).iterrows():
-            corr = scored_data[row["feature"]].corr(scored_data["comprou"])
-            # Calcular Lunar Alignment Score
-            y_t = st.session_state["model"].predict_proba(scored_data[feat_names])[:, 1]  # Probabilidades da classe positiva
-            o_t = scored_data["comprou"].values
-            lunar_score = np.cov(y_t, o_t)[0, 1] if len(y_t) > 1 else 0.0
-            insight = f"🌕 **Insight Lunar**: '{row['feature']}' brilha com {row['importance']:.2f} de importância! Sua correlação com 'comprou' é {corr:.2f}. Lunar Alignment: {lunar_score:.2f}. Considere focar em {row['feature']} para aumentar compras — teste um aumento de 10%!"
-            st.write(textwrap.fill(insight, width=70))
-
-        # Interatividade do Mapa da Lua (Seleção de Clusters)
-        st.subheader("📍 Mapa da Lua - Explore Clusters")
-        selected_cluster = st.selectbox("Escolha um Cluster", options=cluster_names.values())
-        cluster_id = [k for k, v in cluster_names.items() if v == selected_cluster][0]
-        cluster_data = scored_data[scored_data["cluster"] == cluster_id]
-        st.dataframe(cluster_data[["idade", "renda", "visitas_no_site", "comprou"]].describe())
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.scatter(cluster_data["idade"], cluster_data["renda"], c=cluster_data["comprou"], cmap="RdYlGn")
-        ax.set_title(f"Cluster {cluster_id} - Distribuição")
-        st.pyplot(fig)
-
-        # PCA
-        encoded = scored_data.drop(columns=["comprou", "score_final", "cluster"])
-        X_scaled = StandardScaler().fit_transform(encoded)
-        pcs = PCA(n_components=2).fit_transform(X_scaled)
-        st.subheader("📌 PCA com Cluster e Compra")
-        fig, ax = plt.subplots(figsize=(10, 6))
-        scatter = ax.scatter(pcs[:, 0], pcs[:, 1], c=scored_data["cluster"], s=60, alpha=0.7, cmap='tab10')
-        ax.set_title("Mapa de Clientes por PCA e Cluster")
-        ax.set_xlabel("Componente Principal 1")
-        ax.set_ylabel("Componente Principal 2")
-        plt.colorbar(scatter, ax=ax, label="Cluster")
-        st.pyplot(fig)
-
-        # Clusters como bolhas
-        st.subheader("📊 Clusters como Bolhas")
-        cluster_stats = scored_data.groupby("cluster").agg(
-            x=('idade', 'mean'), y=('renda', 'mean'), pct_comprou=('comprou', 'mean'), clientes=('cluster', 'count')
-        ).reset_index()
-        fig2, ax2 = plt.subplots(figsize=(10, 6))
-        scatter2 = ax2.scatter(
-            cluster_stats['x'], cluster_stats['y'], s=cluster_stats['clientes'] * 3, c=cluster_stats['pct_comprou'],
-            alpha=0.7, cmap='RdYlGn', edgecolors='black'
-        )
-        ax2.set_title("Clusters de Clientes - Tamanho e Taxa de Compra")
-        ax2.set_xlabel("Idade média")
-        ax2.set_ylabel("Renda média")
-        plt.colorbar(scatter2, ax=ax2, label="Taxa de Compra")
-        st.pyplot(fig2)
-
-        # Análise de quem comprou
-        st.subheader("🛍️ Quem Comprou e o que têm em comum")
-        features_comp = ["idade", "renda", "visitas_no_site", "tempo_no_site", "cliques_redes_sociais"]
-        medias = scored_data.groupby("comprou")[features_comp].mean().round(2)
-        st.dataframe(medias)
-        fig3, ax3 = plt.subplots(figsize=(10, 6))
-        colors = {1: "green", 0: "orange", -1: "red"}
-        for compra_status in scored_data["comprou"].unique():
-            subset = scored_data[scored_data["comprou"] == compra_status]
-            ax3.scatter(subset["idade"], subset["renda"], c=colors.get(compra_status, 'blue'), s=subset["visitas_no_site"] * 10,
-                        alpha=0.6, label=f"Comprou: {compra_status}")
-        ax3.set_title("Distribuição de Clientes Compradores vs Não Compradores")
-        ax3.set_xlabel("Idade")
-        ax3.set_ylabel("Renda")
-        ax3.legend()
-        st.pyplot(fig3)
-        fig4, ax4 = plt.subplots(figsize=(12, 6))
-        medias.T.plot(kind="bar", ax=ax4)
-        ax4.set_title("Médias das Features por Grupo de Compra")
-        ax4.set_xlabel("Feature")
-        ax4.set_ylabel("Média")
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig4)
-
-        # Grupos de Clientes ou Visitantes
-        st.subheader("📋 Grupos de Clientes ou Visitantes")
-        cluster_summary = scored_data.groupby("cluster").agg(
-            Clientes=('cluster', 'count'), Comprou=('comprou', 'mean')
-        ).reset_index()
-        cluster_summary["Percentual"] = (cluster_summary["Clientes"] / cluster_summary["Clientes"].sum()) * 100
-        cluster_summary["Comprou"] = cluster_summary["Comprou"].round(3)
-        cluster_summary["Percentual"] = cluster_summary["Percentual"].round(1)
-        st.dataframe(cluster_summary)
-    except Exception as e:
-        st.error(f"Erro na visualização: {str(e)}")
-        st.write("Detalhes do erro:")
-        st.exception(e)
-
-# Footer (mantido intacto)
+# Footer
 st.markdown("---")
-st.markdown("💡 **The Moon AI** - Transformando dados em insights e Eurekas!")
+st.markdown("""
+**🧠 Spectra AI - E-PINN System** 
+| *Empathy + Physics + Intelligence* 
+| Desenvolvido com TensorFlow/Keras e Streamlit
+""")
